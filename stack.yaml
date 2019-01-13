@@ -40,7 +40,9 @@ packages:
 - .
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
-# extra-deps: []
+extra-deps:
+- generic-data-0.3.0.0@sha256:86cac53570f45f5b1e5f54d8765d0a05f1674b3703e4dbb48a919f89c57b3cbc
+- base-orphans-0.8@sha256:4885caa82ab94fa5cb841d6d06a43a97cdc7e835f346be4f11c1cc5707b886db
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

@@ -1,274 +1,298 @@
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Main where
 
-import Data.Constraint
-import Data.Semigroup hiding (diff)
+import GHC.Generics
 
-import Control.Applicative
+import Data.Text as T
+import Data.Semigroup hiding (diff, All)
 
-import Control.Lens
-import Control.Lens.Tuple
+import Data.Kind (Constraint, Type)
+
+--import Control.Applicative
+
+import Control.Lens hiding (from, to)
+--import Control.Lens.Tuple
 import Control.Monad.State
 
-class (Semigroup (Change a)) => Patchable a where
-  type Change a
-  patch :: a -> Change a -> a
-  -- @patch a (diff a b) = b@
-  diff ::  a -> a -> Change a
+import Zorja.Patchable
 
-data Jet a = Jet
-  {
-    position :: a, 
-    velocity :: Change a
-  }
 
-jetChange :: (Patchable a, Semigroup (Change a)) => Jet a -> (a -> Change a) -> Jet a
-jetChange (Jet a da) f = let da' = f a
-                      in
-                        Jet (patch a da') (da <> da')
+data HKDDelta a
 
-jetify :: (Patchable a, Monoid (Change a)) => a -> Jet a
-jetify x = Jet { position = x, velocity = mempty } 
+--
+-- A trick to remove Identity in higher-kinded types
+--
 
-showJet :: (Show a, Show (Change a)) => Jet a -> String
-showJet a = let x = position a
-                dx = velocity a
-            in "Jet " ++ show x ++ ", " ++ show dx
-
-instance (Show a, Show (Change a)) => Show (Jet a) where
-  show x = showJet x
-
+type family HKD f a where
+  HKD Identity a = a
+  HKD HKDDelta a = PatchDelta a
+  HKD f a        = f a
 
 
 --
--- Atomic Jet types are primitives where the "diff"
--- is simply replacing the previous value with a whole
--- new value. No incremental relationship is assumed between
--- the old and new values. The diff type is called
--- "Wham" and behaves as an (Option (Last x))
+-- Some record. We want to record changes to this record
+-- (performed using lenses) incrementally.
+--
 
-newtype AtomicJet a = Atomic a deriving (Eq, Show)
+data SomeDude f = SD
+  {
+    v1 :: HKD f (Pair (Sum Int)),
+    v2 :: HKD f (Text)
+  } deriving (Generic)
 
-atomicWham :: (a -> b) -> AtomicJet a -> Wham b
-atomicWham f (Atomic a) = Wham (f a)
+type instance PatchDelta (SomeDude Identity) = SomeDude HKDDelta
 
-data Wham a = NoWham 
-            | Wham a
-  deriving (Eq, Show)
+--
+-- default type is SomeDude Identity, the diff type is SomeDude HKDDelta
+--
 
-instance Functor Wham where
-  fmap f (Wham a) = Wham (f a)
+deriving instance Show (SomeDude Identity)
+deriving instance Show (SomeDude HKDDelta)
 
-instance Semigroup (Wham a) where
-  a <> (Wham b) = Wham b
-  a <> NoWham = a
 
-instance Monoid (Wham a) where
-  mempty = NoWham
+instance Semigroup (SomeDude HKDDelta) where
+  (SD f1 f2) <> (SD f1' f2') = SD (f1 <> f1') (f2 <> f2')
+
+instance Monoid (SomeDude HKDDelta) where
+  mempty = SD mempty mempty
   mappend = (<>)
 
-
--- note that the Change is (Wham a) and not (Wham (Change a)) because
--- we don't know if there is (Patchable a) and in any case we
--- just replace the whole a every time anyway, instead of incrementally
--- modifying it
-
-instance (Eq a) => Patchable (AtomicJet a) where
-  type Change (AtomicJet a) = Wham a
-  patch :: AtomicJet a -> Wham a -> AtomicJet a
-  patch a ad =  case ad of
-                  NoWham -> a
-                  Wham b  -> Atomic b
-
-  diff :: AtomicJet a -> AtomicJet a -> Wham a
-  diff (Atomic x) (Atomic y) =  if x == y
-                                  then NoWham
-                                  else (Wham y)
-
-instance Functor AtomicJet where
-  fmap f (Atomic a) = Atomic (f a)
+instance Patchable (SomeDude Identity) where
+  patch s ds = patchGeneric s ds
+  changes s1 s2 = changesGeneric s1 s2
 
 
-instance (Patchable a, Patchable b) => Patchable (a,b) where
-  type Change (a,b) = (Change a, Change b)
-  patch :: (a,b) -> (Change a,Change b) -> (a,b)
-  patch (a,b) (da,db) = (patch a da, patch b db)
+--
+-- encode example from GHC.Generics
+--
 
-  diff :: (a,b) -> (a,b) -> (Change a, Change b)
-  diff (a0,b0) (a1,b1) = (diff a0 a1, diff b0 b1)
+class Encode' f where
+  encode' :: f p -> [Bool]
 
+instance Encode' V1 where
+  encode' _ = undefined
 
--- A PatchedJet contains patch data and the value AFTER the
--- patch has been applied. This is useful when compose functions
--- that produce and accumulate patch data. Otherwise when composing
--- we have to always apply 'patch a da' to get the most up-to-date
--- changed value.
+instance Encode' U1 where
+  encode' U1 = []
 
-data PatchedJet a = PatchedJet { val :: a, history :: Change a }
+instance (Encode' f, Encode' g) => Encode' (f :+: g) where
+  encode' (L1 x) = False : encode' x
+  encode' (R1 x) = True  : encode' x
 
-deriving instance (Eq a, Eq (Change a), Patchable a) => Eq (PatchedJet a)
-deriving instance (Show a, Show (Change a), Patchable a) => Show (PatchedJet a)
+instance (Encode' f, Encode' g) => Encode' (f :*: g) where
+  encode' (x :*: y) = encode' x ++ encode' y
 
-toPatchedJet :: (Patchable a, Monoid (Change a)) => a -> PatchedJet a
-toPatchedJet a = PatchedJet a mempty
+instance (Encode c) => Encode' (K1 i c) where
+  encode' (K1 x) = encode x
 
-instance (Patchable a, Patchable b, Semigroup (Change a), Semigroup (Change b)) =>
-  Field1 (PatchedJet (a,b)) (PatchedJet (a,b)) (PatchedJet a) (PatchedJet a)
-    where
-  _1 k (PatchedJet x@(a,b) dx@(da,db)) = 
-    let x' = k (PatchedJet a da)
-        lxify = \(PatchedJet a' da') -> PatchedJet (a',b) (da', db)
-    in fmap lxify x'
+instance (Encode' f) => Encode' (M1 D t f) where
+  encode' (M1 x) = encode' x
+instance (Encode' f, Constructor t) => Encode' (M1 C t f) where
+  encode' mx@(M1 x) = if conName mx == "PatchedJet"
+                      then True : encode' x
+                      else False : encode' x
+instance (Encode' f) => Encode' (M1 S t f) where
+  encode' (M1 x) = encode' x
+
+class Encode a where
+  encode :: a -> [Bool]
+  default encode :: (Generic a, Encode' (Rep a)) => a -> [Bool]
+  encode x = encode' (from x)
+
+instance Encode Text where
+  encode _ = [True]
+
+instance Encode Integer where
+  encode _ = [True]
+
+instance (Encode a) => Encode (Option a) where
+  encode a = True : (encode $ getOption a)
+
+instance (Encode a) => Encode (Maybe a) where
+  encode Nothing = [False]
+  encode (Just a) = True : (encode a)
+
+instance Encode (Last a) where
+  encode _ = [True]
   
+instance Encode Int where
+  encode _ = [True]
 
-instance (Patchable a, Patchable b, Semigroup (Change a), Semigroup (Change b)) =>
-  Field2 (PatchedJet (a,b)) (PatchedJet (a,b)) (PatchedJet b) (PatchedJet b)
-    where
-  _2 k (PatchedJet x@(a,b) dx@(da,db)) = 
-    let b' = k (PatchedJet b db)
-        lxify = \(PatchedJet b' db') -> PatchedJet (a,b') (da, db')
-    in fmap lxify b'
+instance Encode ((,) a b) where
+  encode _ = [True, True]
 
+instance Encode (Pair a) where
+  encode (Ax _ _) = [True,True]
   
+instance Encode (SomeDude Identity)
+instance Encode (SomeDude HKDDelta)
+instance (Encode a, Encode (PatchDelta a)) => Encode (PatchedJet a)
 
-pjetGo :: (Patchable a) => a -> (a -> Change a) -> PatchedJet a
-pjetGo a f = PatchedJet a (f a)
+--
+-- lens via generics
+--
 
-pjetLens :: (Patchable a, Semigroup (Change a)) => 
-  (a -> Change a) -> PatchedJet a -> PatchedJet a
-pjetLens f (PatchedJet a da) = let da' = f a
-                               in PatchedJet (patch a da') (da <> da')
+data LensFor s a = LensFor
+  { getLensFor :: Lens' s a }
 
-jetWhamLens :: (a -> a) -> PatchedJet (AtomicJet a) -> PatchedJet (AtomicJet a)
-jetWhamLens f (PatchedJet (Atomic a) _) =
-  let a' = f a
-  in PatchedJet (Atomic a') (Wham a')
+class GLenses z i o where
+  glenses :: Lens' (z Identity) (i p) -> o p
 
 
 --
--- monadic lens operations
+-- convert from @a@ to a lens from @(z Identity)@ to @a@
 --
 
-data PatchedMonad s m a = PM { runPM :: (PatchedJet s) -> m (a, PatchedJet s) }
+instance GLenses z (K1 _x a)
+                   (K1 _x (LensFor (z Identity) a)) where
+  glenses l = K1
+              $ LensFor
+              $ \f -> l $ fmap K1 . f . unK1
+  {-# INLINE glenses #-}
 
-instance (Functor m) => Functor (PatchedMonad s m) where
-  fmap f pm = PM (\pj -> let mapfst = \(a,b) -> (f a, b)
-                         in fmap mapfst (runPM pm pj))
-                    
-instance (Applicative m) => Applicative (PatchedMonad s m) where
-  pure a = PM (\pj -> pure (a, pj))
-  x <*> y = PM
-    (\pj -> let x' = runPM x pj
-                y' = runPM y pj
-                fm (f,s) = \(a,s) -> (f a, s)
-            in (fmap fm x') <*> y')
-  
-instance (Monad m) => Monad (PatchedMonad s m) where
-  return    = pure
-  a >>= b   = PM (\pj -> do (a1,pj1) <- runPM a pj
-                            runPM (b a1) pj1)
+instance (GLenses z i o) => GLenses z (M1 _a _b i) (M1 _a _b o) where
+  glenses l = M1 $ glenses $ \f -> l $ fmap M1 . f . unM1
+  {-# INLINE glenses #-}
 
-instance (Monad m, Patchable s) => MonadState s (PatchedMonad s m) where
-  get = PM (\pj -> return (val pj, pj))
-  put = (\s -> PM (\pj -> let newhistory = history pj <> diff (val pj) s
-                              newpj = PatchedJet s newhistory
-                          in return ((), newpj)))
+instance (GLenses z i o, GLenses z i' o') => GLenses z (i :*: i') (o :*: o') where
+  glenses l = glenses (\f -> l (\(a :*: b) -> fmap (:*: b) $ f a))
+          :*: glenses (\f -> l (\(a :*: b) -> fmap (a :*:) $ f b))
+  {-# INLINE glenses #-}
+
+instance GLenses z V1 V1 where
+  glenses _ = undefined
+
+instance GLenses z U1 U1 where
+  glenses _ = U1
+
+
+getLenses :: forall z.
+  ( Generic (z Identity),
+    Generic (z (LensFor (z Identity))),
+    GLenses z (Rep (z Identity)) (Rep (z (LensFor (z Identity)))))
+          => z (LensFor (z Identity))
+getLenses = to $ glenses @z $ iso from to
 
 
 --
---
---
+-- SomeDude rec
+-- 
 
 
-instance Patchable Int where
-  type Change Int = Option (Last Int)
-  patch a da = case getOption da of
-                 Nothing -> a
-                 Just (Last a') -> a'
-  diff a b = if (a == b)
-             then Option Nothing
-             else Option $ Just (Last b)
+startDudeValue :: SomeDude Identity
+startDudeValue = SD {
+  v1 = Ax 3 3,
+  v2 = (pack "argh")
+  }
 
-instance Patchable String where
-  type Change String = Option (Last String)
-  patch a da = case getOption da of
-                 Nothing -> a
-                 Just (Last a') -> a'
-  diff a b = if (a == b)
-             then Option Nothing
-             else Option (Just (Last b))
+processDudeValue :: StateT (SomeDude Identity) IO (SomeDude Identity)
+processDudeValue = do
+  let SD (LensFor lv1) (LensFor _lv2) = getLenses
+  lv1 .= (Ax 4 5)
+  get >>= return
 
-data SomeDude = SD { v1 :: Int, v2 :: String } deriving (Eq, Show)
-data SomeDudeD = SDD { v1d :: Change Int, v2d :: Change String } deriving (Eq, Show)
-
-
-instance Semigroup SomeDudeD where
-  a <> b = SDD (v1d a <> v1d b) (v2d a <> v2d b)
-
-instance Monoid SomeDudeD where
-  mempty = SDD mempty mempty
-
-instance Patchable SomeDude where
-  type Change SomeDude = SomeDudeD
-  patch a da = let v1' = patch (v1 a) (v1d da)
-                   v2' = patch (v2 a) (v2d da)
-               in SD v1' v2'
-  diff a b = let v1d' = diff (v1 a) (v1 b)
-                 v2d' = diff (v2 a) (v2 b)
-             in SDD v1d' v2d'
-  
-v1lens :: Lens' SomeDude Int
-v1lens = lens v1 (\somedude newv -> somedude { v1 = newv})
-
-
-pjlens :: Lens' (PatchedJet SomeDude) SomeDude
-pjlens = lens val (\pj newval -> let vald = diff (val pj) newval
-                                     mergedhistory = (history pj) <> vald
-                                 in PatchedJet newval mergedhistory)
-
-v2lens :: Lens' SomeDude String
-v2lens = lens v2 (\somedude newv -> somedude { v2 = newv})
-
-
-incDude :: State SomeDude ()
-incDude = do
-  v1lens .= 2
-  v2lens %= ("blargh " ++)
-  return ()
-
-incDudePatch :: PatchedMonad SomeDude Identity ()
-incDudePatch = do
-  v2lens %= ("blargh" ++)
-  return ()
-
-incDudePatch2 :: PatchedMonad SomeDude Identity ()
-incDudePatch2 = do
-  v1lens .= 2
-  return ()
-
-startDudeValue = SD 3 "argh"
-
-val1 = snd . runIdentity $ runPM incDudePatch (toPatchedJet startDudeValue)
-val2 = snd . runIdentity $ runPM incDudePatch2 (toPatchedJet startDudeValue)
+--  (SD { v1 = Ax 5 3, v2 = (pack "argh")})
 
 main :: IO ()
 main = do
-  let x = jetify (Atomic (3 :: Integer))
-  putStrLn (showJet x)
-  let a = jetify (Atomic (2 :: Int),Atomic "argh")
-  putStrLn (showJet a)
-  let b = PatchedJet (Atomic 2,Atomic 3) (mempty :: (Wham Int, Wham Int))
-  let c = over _2 (jetWhamLens ((-) 3)) $ over _1 (jetWhamLens (+2)) b
-  putStrLn $ show b
-  putStrLn $ show c
-  let d = view _1 b
-  putStrLn $ show d
+  let x = toJet (AtomicLast (3 :: Integer))
+  putStrLn $ show x
+  dd <- evalStateT processDudeValue startDudeValue
+  putStrLn $ show dd
   
+
+  
+
+--
+-- transient workspace
+--
+
+type family All (c :: Type -> Constraint) (ts :: [Type]) :: Constraint where
+  All c '[]     = ()
+  All c (t ': ts) = (c t, All c ts)
+
+
+data HList (ts :: [Type]) where
+  HNil :: HList '[]
+  (:#) :: t -> HList ts -> HList (t ': ts)
+
+infixr 5 :#
+
+hLength :: HList ts -> Int
+hLength HNil = 0
+hLength (_ :# ts) = 1 + hLength ts
+
+
+instance (All Eq ts) => Eq (HList ts) where
+  HNil == HNil = True
+  (a :# as) == (b :# bs)        =   a == b && as == bs                                              
+instance (All Eq ts, All Ord ts) => Ord (HList ts) where
+  compare HNil HNil = EQ
+  compare (a :# as) (b :# bs)   =
+    case (compare a b) of
+      EQ         -> compare as bs
+      e          -> e
+
+
+instance (All Show ts) => Show (HList ts) where
+  show HNil = "Nil"
+  show (x :# xs) = show x ++ " :# " ++ show xs
+                                    
+
+type family AllEq (ts :: [Type]) :: Constraint where
+  AllEq '[] = ()
+  AllEq (t ': ts) = (Eq t, AllEq ts)
+
+newtype Cont a = Cont
+          { runCont :: forall r . (a -> r) -> r }
+
+instance Functor Cont where
+  fmap fab (Cont far) = Cont $ \fbr -> far (fbr . fab)
+
+instance Applicative Cont where
+  pure a = Cont $ \far -> far a
+  (Cont fabrr) <*> (Cont far) = Cont $ \fbr -> let fabr = \fab -> far (fbr . fab)
+                                               in fabrr fabr
+
+instance Monad Cont where
+  return = pure
+  (Cont l) >>= r = Cont $ \fbr -> let far  = \a -> runCont (r a) fbr
+                                  in l far
+
+newtype ContT (m :: * -> *) a = ContT { runContT :: forall r. (a -> m r) -> m r }
+
+instance Functor (ContT m) where
+  fmap fab c = ContT $ \fbmr -> let famr = runContT c
+                                in famr (fbmr . fab)
+
+instance Applicative (ContT m) where
+  pure a = ContT $ \fmar -> fmar a
+  fabmrmr <*> amr = ContT $ \bmr -> let fabmr = \fab -> (runContT amr) (bmr . fab)
+                                    in (runContT fabmrmr) fabmr
+
+instance Monad (ContT m) where
+  return = pure
+  (ContT l) >>= r = ContT $ \fbmr -> let amr = \a -> runContT (r a) fbmr
+                                     in l amr
+             
+
+

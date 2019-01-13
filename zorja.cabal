@@ -16,8 +16,14 @@ extra-source-files:  README.md
 executable zorja
   hs-source-dirs:      src
   main-is:             Main.hs
+  ghc-options:         -Wall -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5,
                        constraints,
+                       containers,
                        lens,
-                       mtl
+                       mtl,
+                       text,
+                       generic-deriving,
+                       generic-data
+                       
