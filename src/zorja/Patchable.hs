@@ -11,7 +11,16 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE DataKinds #-}
 
-module Zorja.Patchable where
+module Zorja.Patchable 
+  (Patchable,
+  patch,
+  changes, 
+   PatchDelta, 
+   AtomicLast(..),
+   ANum, 
+   patchGeneric, 
+   changesGeneric)
+  where
 
 import GHC.Generics
 
@@ -20,8 +29,8 @@ import Data.Semigroup
 
 --import Data.Semigroup
 --import Data.Monoid
+import Control.Applicative
 
-import Control.Lens hiding (from, to)
 --import Control.Lens.Tuple
 
 type family PatchDelta a
@@ -39,21 +48,6 @@ class (Monoid (PatchDelta a)) => Patchable a where
   patch :: a -> PatchDelta a -> a
   -- @changes a b@ generates a @Change a@ that can convert a into b via @patch@
   changes ::  a -> a -> PatchDelta a
-
-
---
--- patchable instance for Text
---
-
-type instance PatchDelta Text = Option (Last Text)
-
-instance Patchable Text where
-  patch x dx = case getOption dx of
-    Nothing -> x
-    Just dx' -> getLast dx'
-  changes x0 x1 = if x0 == x1
-                  then Option Nothing
-                  else Option (Just (Last x1))
 
 --
 -- AtomicLast is a Patchable type that just replaces the
@@ -74,7 +68,14 @@ instance (Eq a) => Patchable (AtomicLast a) where
     then Option Nothing
     else Option $ Just (Last b)
 
---
+instance Functor AtomicLast where
+  fmap f (AtomicLast x) = AtomicLast (f x)
+
+instance Applicative AtomicLast where
+  pure x = AtomicLast x
+  (AtomicLast a) <*> (AtomicLast b) = AtomicLast (a b)
+
+  --
 -- Patchable Pair
 --
 
@@ -98,46 +99,8 @@ instance (Eq a) => Patchable (Pair a) where
                   then Option Nothing
                   else Option (Just (Last x1))
                           
-
-
-
 --
--- @Jet@ bundles a value and its delta into a single record.
---
-
-data Jet a = Jet
-  {
-    position :: a, 
-    velocity :: PatchDelta a
-  }
-
-toJet :: (Patchable a) => a -> Jet a
-toJet x = Jet { position = x, velocity = mempty }
-
-
-deriving instance (Eq a, Eq (PatchDelta a), Patchable a) => Eq (Jet a)
-deriving instance (Show a, Show (PatchDelta a), Patchable a) => Show (Jet a)
-
-
-
--- A PatchedJet contains patch data and the value AFTER the
--- patch has been applied. This is useful when compose functions
--- that produce and accumulate patch data. Otherwise when composing
--- we have to always apply 'patch a da' to get the most up-to-date
--- changed value.
-
-data PatchedJet a = PatchedJet { patchedval :: a, history :: PatchDelta a }
-                  deriving (Generic)
-
-deriving instance (Eq a, Eq (PatchDelta a), Patchable a) => Eq (PatchedJet a)
-deriving instance (Show a, Show (PatchDelta a), Patchable a) => Show (PatchedJet a)
-
-toPatchedJet :: (Patchable a) => a -> PatchedJet a
-toPatchedJet a = PatchedJet a mempty
-
-
---
--- PatchedJet lenses for  tuples
+-- patchable tuples
 --
 
 type instance PatchDelta (a,b) = (PatchDelta a, PatchDelta b)
@@ -146,23 +109,54 @@ instance (Patchable a, Patchable b) => Patchable (a,b) where
   patch (a,b) (da,db) = (patch a da, patch b db)
   changes (a0,b0) (a1,b1) = (changes a0 a1, changes b0 b1)
 
-instance 
-  Field1 (PatchedJet (a,b)) (PatchedJet (a,b)) (PatchedJet a) (PatchedJet a)
-    where
-  _1 k (PatchedJet (a,b) (da,db)) = 
-    let x' = k (PatchedJet a da)
-        lxify = \(PatchedJet a' da') -> PatchedJet (a',b) (da', db)
-    in fmap lxify x'
+
+--
+-- patchable instance for Text
+--
+
+type instance PatchDelta Text = Option (Last Text)
+
+instance Patchable Text where
+  patch x dx = case getOption dx of
+    Nothing -> x
+    Just dx' -> getLast dx'
+  changes x0 x1 = if x0 == x1
+                  then Option Nothing
+                  else Option (Just (Last x1))
+
+--
+-- 'Atomic Num' basically a Num type that supports AtomicLast
+-- style patching.
+--
+newtype ANum a = ANum a deriving (Eq, Show)
+
+type instance PatchDelta (ANum a) = Option (Last a)
+
+instance Functor ANum where
+  fmap f (ANum x) = ANum (f x)
+
+instance Applicative (ANum) where
+  pure x = ANum x
+  (ANum a) <*> (ANum b) = ANum (a b)
+
+instance (Num a) => Num (ANum a) where
+  a + b = liftA2 (+) a b
+  a * b = liftA2 (*) a b
+  abs a = fmap abs a
+  signum a = fmap signum a
+  negate a = fmap negate a
+  fromInteger n = ANum (fromInteger n)
+
+instance (Eq a) => Patchable (ANum a) where
+  patch x dx = case getOption dx of
+    Nothing -> x
+    Just dx' -> ANum (getLast dx')
+  changes (ANum x0) (ANum x1) =
+      if x0 == x1
+      then Option Nothing
+      else Option (Just (Last x1))
+
   
-
-instance 
-  Field2 (PatchedJet (a,b)) (PatchedJet (a,b)) (PatchedJet b) (PatchedJet b)
-    where
-  _2 k (PatchedJet (a,b) (da,db)) = 
-    let bX = k (PatchedJet b db)
-        lxify = \(PatchedJet b' db') -> PatchedJet (a,b') (da, db')
-    in fmap lxify bX
-
 
 --
 -- Patchable generics, useful for records or extended sum types

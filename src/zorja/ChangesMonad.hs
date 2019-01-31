@@ -15,6 +15,7 @@ module Zorja.ChangesMonad where
 import Control.Monad.State
 
 import Zorja.Patchable
+import Zorja.Jet
 
 --
 -- State monad for a Patchable data type, using @changes@ to find change
@@ -50,8 +51,10 @@ instance (Monad m, Patchable s) => MonadState s (ChangesMonad s m) where
   --
   -- in the function @s@ is the new state sent by put, and pj is the
   -- current state from the upstream monad.
-  put = (\s -> ChangesMonad
-          (\pj -> let newhistory = history pj <> changes (patchedval pj) s
-                      newpj = PatchedJet s newhistory
-                  in return ((), newpj)))
+  put = (\new_s -> ChangesMonad
+          (\pj -> let old_history = history pj
+                      old_s       = patchedval pj
+                      new_history = old_history <> changes (patchedval pj) new_s
+                      new_pj = PatchedJet new_s new_history
+                  in return ((), new_pj)))
 
