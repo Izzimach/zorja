@@ -12,14 +12,19 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FunctionalDependencies #-}
 
 module Zorja.Jet where
 
-import GHC.Generics
+--
+-- access Generic from and to as G.from and G. to
+--
+import GHC.Generics hiding (from, to)
+import qualified GHC.Generics as G
 
 import Zorja.Patchable
 
-import Control.Lens hiding (from, to)
+import Control.Lens
 
 
 --
@@ -59,6 +64,9 @@ deriving instance (Show a, Show (PatchDelta a), Patchable a) => Show (PatchedJet
 
 toPatchedJet :: (Patchable a) => a -> PatchedJet a
 toPatchedJet a = PatchedJet a mempty
+
+fromPatchedJet :: PatchedJet a -> a
+fromPatchedJet = patchedval
 
 
 
@@ -101,10 +109,10 @@ class HKDLenses z i o where
   gHKDlenses :: Lens' (z Identity) (i p) -> o p
 
 instance HKDLenses z (K1 _x a)
-                   (K1 _x (LensFor (z Identity) a)) where
+                     (K1 _x (LensFor (z Identity) a)) where
   gHKDlenses l = K1
-              $ LensFor
-              $ \f -> l $ fmap K1 . f . unK1
+                 $ LensFor
+                 $ \f -> l $ fmap K1 . f . unK1
   {-# INLINE gHKDlenses #-}
 
 instance (HKDLenses z i o) => HKDLenses z (M1 _a _b i) (M1 _a _b o) where
@@ -122,17 +130,70 @@ instance HKDLenses z V1 V1 where
 instance HKDLenses z U1 U1 where
   gHKDlenses _ = U1
 
-
 getHKDLenses :: forall z.
   ( Generic (z Identity),
     Generic (z (LensFor (z Identity))),
     HKDLenses z (Rep (z Identity)) (Rep (z (LensFor (z Identity)))) )
           => z (LensFor (z Identity))
-getHKDLenses = to $ gHKDlenses @z $ iso from to
+getHKDLenses = G.to $ gHKDlenses @z $ iso G.from G.to
+
+
+--
+-- lens for PatchDelta records
+--
+
+data PData a
+
+data LensForDelta s a = LensForDelta
+  { getLensForDelta :: Lens' s a }
+
+
+class HKDDeltaLenses z i o where
+  -- the input (i p) is a lens from the HKD record to
+  -- the Generic rep, built by 'iso from to' in getHKDLenses
+  -- and the return value (o p) is the Generic rep with the
+  -- Lenses 'inside' so basically the Generic instances
+  -- either build the Lens (for K1) or wrap the Generic
+  -- constructors around whatever lens is there.
+  gHKDDeltaLenses :: Lens' (z PData) (i p) -> o p
+
+instance HKDDeltaLenses z (K1 _x a)
+                      (K1 _x (LensForDelta (z PData) a)) where
+  gHKDDeltaLenses l = K1
+                      $ LensForDelta
+                      $ \f -> l $ fmap K1 . f . unK1
+  {-# INLINE gHKDDeltaLenses #-}
+
+instance (HKDDeltaLenses z i o) => HKDDeltaLenses z (M1 _a _b i) (M1 _a _b o) where
+  gHKDDeltaLenses l = M1 $ gHKDDeltaLenses $ \f -> l $ fmap M1 . f . unM1
+  {-# INLINE gHKDDeltaLenses #-}
+
+instance (HKDDeltaLenses z i o, HKDDeltaLenses z i' o') => HKDDeltaLenses z (i :*: i') (o :*: o') where
+  gHKDDeltaLenses l = gHKDDeltaLenses (\f -> l (\(a :*: b) -> fmap (:*: b) $ f a))
+                  :*: gHKDDeltaLenses (\f -> l (\(a :*: b) -> fmap (a :*:) $ f b))
+  {-# INLINE gHKDDeltaLenses #-}
+
+instance HKDDeltaLenses z V1 V1 where
+  gHKDDeltaLenses _ = undefined
+
+instance HKDDeltaLenses z U1 U1 where
+  gHKDDeltaLenses _ = U1
+  
+
+getHKDDeltaLenses :: forall z.
+  (  Generic ((z PData)),
+     Generic (z (LensForDelta ( (z PData)))),
+     HKDDeltaLenses z (Rep ((z PData))) (Rep (z (LensForDelta ((z PData))))))
+          => z (LensForDelta ((z PData)))
+getHKDDeltaLenses = G.to $ gHKDDeltaLenses @z $ iso G.from G.to
+
 
 --
 -- HKD for patchedjet lenses.
 --
+
+data PJLensFor s a = PJLensFor
+  { getPJLensFor :: Lens' (PatchedJet s) (PatchedJet a) }
 
 class PJHKDLenses z i o where
   -- the input (i p) is a lens from the HKD record to
@@ -141,22 +202,27 @@ class PJHKDLenses z i o where
   -- Lenses 'inside' so basically the Generic instances
   -- either build the Lens (for K1) or wrap the Generic
   -- constructors around whatever lens is there.
-  gPJHKDLenses :: Lens' (z Identity) (i p) -> o p
+  gPJHKDLenses :: Lens' (PatchedJet (z Identity)) (i p) -> o p
 
-instance (Patchable (z Identity)) => PJHKDLenses z (K1 _x a)
-                   (K1 _x (LensFor (PatchedJet (z Identity)) a)) where
+instance {-(Patchable (z Identity)) => -} PJHKDLenses z (K1 _x (PatchedJet a))
+                   (K1 _x (PJLensFor (z Identity) a)) where
   gPJHKDLenses l = K1
-              $ LensFor
-              $ \f -> fmap toPatchedJet . (l $ fmap K1 . f . unK1) . patchedval
+                    $ PJLensFor
+                    $ \f -> (l $ fmap K1 . f . unK1)
   {-# INLINE gPJHKDLenses #-}
 
-instance (PJHKDLenses z i o) => PJHKDLenses z (M1 _a _b i) (M1 _a _b o) where
+instance {-# OVERLAPPING #-} 
+    PJHKDLenses z (M1 D ('MetaData "PatchedJet" _1 _2 _3) i)
+                  (M1 D _x  o) where
+  gPJHKDLenses _l = M1 $ undefined
+      
+instance {-# OVERLAPPING #-} (PJHKDLenses z i o) => PJHKDLenses z (M1 _a _b i) (M1 _a _b o) where
   gPJHKDLenses l = M1 $ gPJHKDLenses $ \f -> l $ fmap M1 . f . unM1
   {-# INLINE gPJHKDLenses #-}
 
 instance (PJHKDLenses z i o, PJHKDLenses z i' o') => PJHKDLenses z (i :*: i') (o :*: o') where
   gPJHKDLenses l = gPJHKDLenses (\f -> l (\(a :*: b) -> fmap (:*: b) $ f a))
-             :*: gPJHKDLenses (\f -> l (\(a :*: b) -> fmap (a :*:) $ f b))
+               :*: gPJHKDLenses (\f -> l (\(a :*: b) -> fmap (a :*:) $ f b))
   {-# INLINE gPJHKDLenses #-}
 
 instance PJHKDLenses z V1 V1 where
@@ -167,42 +233,14 @@ instance PJHKDLenses z U1 U1 where
 
 
 getPJHKDLenses :: forall z.
-  ( Generic (z Identity),
-  Generic (z (LensFor (PatchedJet (z Identity)))),
-  PJHKDLenses z (Rep (z Identity)) (Rep (z (LensFor (PatchedJet (z Identity))))) )
-          => z (LensFor (PatchedJet (z Identity)))
-getPJHKDLenses = to $ gPJHKDLenses @z $ iso from to
+  ( Generic (PatchedJet (z Identity)),
+    Generic (z (PJLensFor (z Identity))),
+    PJHKDLenses z (Rep (PatchedJet (z (Identity))))
+                  (Rep (z (PJLensFor (z Identity)))) )
+          => z (PJLensFor (z Identity))
+getPJHKDLenses = G.to $ gPJHKDLenses @z $ iso G.from G.to
 
 
-
-
---
--- Lenses for PatchedJet wrappers around HKD records
---
-
-type family PJLens z
-
-type instance PJLens (z Identity) = z (LensFor (z Identity))
-
-type instance PJLens (PatchedJet (z Identity)) = z (LensFor (PatchedJet (z Identity)))
-
-
-class PJLensFor z where
-  pjlensfor :: z -> PJLens z
-
-instance 
-  ( Generic (z Identity),
-    Generic (z (LensFor (z Identity))),
-    HKDLenses z (Rep (z Identity)) (Rep (z (LensFor (z Identity)))) )
-      => PJLensFor (z Identity) where
-  pjlensfor _ = getHKDLenses
-
-instance 
-  ( Generic (z Identity),
-    Generic (z (LensFor (PatchedJet (z Identity)))),
-    PJHKDLenses z (Rep (z Identity)) (Rep (z (LensFor (PatchedJet (z Identity))))) )
-      => PJLensFor (PatchedJet (z Identity)) where
-  pjlensfor _ = getPJHKDLenses
 
 
 --
@@ -232,3 +270,9 @@ instance (GVal a a', GVal b b') => GVal (a :+: b) (a' :+: b') where
 
 instance (GVal a a', GVal b b') => GVal (a :*: b) (a' :*: b') where
   gval (a :*: b) = (gval a) :*: (gval b)
+
+
+
+instance (Patchable a) => Wrapped (PatchedJet a) where
+  type Unwrapped (PatchedJet a) = a
+  _Wrapped' = iso patchedval toPatchedJet

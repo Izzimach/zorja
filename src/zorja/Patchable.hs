@@ -17,7 +17,7 @@ module Zorja.Patchable
   changes, 
    PatchDelta, 
    AtomicLast(..),
-   ANum, 
+   ANum(..), 
    patchGeneric, 
    changesGeneric)
   where
@@ -75,7 +75,7 @@ instance Applicative AtomicLast where
   pure x = AtomicLast x
   (AtomicLast a) <*> (AtomicLast b) = AtomicLast (a b)
 
-  --
+--
 -- Patchable Pair
 --
 
@@ -108,7 +108,7 @@ type instance PatchDelta (a,b) = (PatchDelta a, PatchDelta b)
 instance (Patchable a, Patchable b) => Patchable (a,b) where
   patch (a,b) (da,db) = (patch a da, patch b db)
   changes (a0,b0) (a1,b1) = (changes a0 a1, changes b0 b1)
-
+  
 
 --
 -- patchable instance for Text
