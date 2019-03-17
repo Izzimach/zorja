@@ -12,7 +12,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -24,8 +23,9 @@ import GHC.Generics
 
 import Data.Text as T
 --import Data.Semigroup hiding (diff, All)
+import Data.Monoid (Sum(..))
 
---import Data.Kind (Constraint, Type)
+import Data.Kind (Constraint, Type)
 
 import Control.Lens hiding (from, to)
 --import Control.Lens.Tuple
@@ -33,8 +33,9 @@ import Control.Monad.State
 
 import Zorja.Patchable
 import Zorja.Jet
-import Zorja.Collections (PatchableSet)
-import qualified Zorja.Collections as ZC
+import Zorja.Collections.PatchableSet (PatchableSet)
+import Zorja.ZCCC
+import qualified Zorja.Collections.PatchableSet as S
 
 
 --
@@ -138,6 +139,10 @@ difP l = \pj -> let v = (patchedval pj)
                         PatchedJet v' (h <> (changes v v'))
                 in fmap rebuild (l v)
 
+--(.=) :: (MonadState s m) => ASetter s s a b -> b -> m ()
+--l .= b = modify ((l . difP) .~ b)
+--infixr 4 .=
+
 --
 -- SomeDude rec
 -- 
@@ -146,19 +151,87 @@ startDudeValue :: SomeDude Identity
 startDudeValue = SD {
     v1 = (3,3)
   , v2 = (pack "argh")
-  , v3 = ZC.empty
+  , v3 = S.empty
   }
 
 processDudeValue :: StateT (PatchedJet (SomeDude Identity)) IO ()
 processDudeValue = do
     let SD (PJLensFor v1') (PJLensFor v2') (PJLensFor v3') = getPJLenses
-    v1' . _1 . difP  .= (ANum (4 :: Int))
-    v2'      . difP  .= (pack "blargh")
-    v3'              %= ZC.insert 4
-    v3'              %= ZC.insert 7
-    v3'              %= ZC.delete 4
+    v1' . _1 . difP .= (ANum (4 :: Int))
+    v2'      . difP .= (pack "blargh")
+    v3'             %= S.insert 4
+    v3'             %= S.insert 7
+    v3'             %= S.delete 4
 
---  (SD { v1 = Ax 5 3, v2 = (pack "argh")})
+--
+-- test of sum type using integers
+--
+
+newtype SomeNum = SomeNum { getSomeNum :: Integer }
+
+type instance (PatchDelta SomeNum) = Sum Integer
+
+instance (Patchable SomeNum) where
+  patch (SomeNum a) (Sum da) = SomeNum (a + da)
+  changes (SomeNum a) (SomeNum b) = Sum (b - a)
+
+--
+-- a Simple patchable sum type
+--
+data BiggerSmaller = Bigger | Smaller deriving (Eq, Show)
+data PatchSumType a = Value a | PatchSum a | NoPatch deriving (Eq, Show)
+
+type instance (PatchDelta BiggerSmaller) = PatchSumType BiggerSmaller
+
+instance Semigroup (PatchSumType a) where
+    a <> NoPatch = a
+    _ <> b = b
+    
+instance Monoid (PatchSumType a) where
+    mempty = NoPatch
+    mappend = (<>)
+
+instance Patchable (BiggerSmaller) where
+    patch a da = case da of
+                     PatchSum b -> b
+                     Value b -> b
+                     NoPatch -> a
+    changes _a b = Value b
+
+-- Jet for boolean
+data BoolChange = NotVal | NoChange
+
+instance Semigroup (BoolChange) where
+    NotVal <> NotVal = NoChange
+    a <> NoChange = a
+    NoChange <> a = a
+
+instance Monoid (BoolChange) where
+    mempty = NoChange
+    mappend = (<>)
+
+
+newtype ZBool = ZBool { unZBool :: Bool } deriving (Eq)
+
+type instance (PatchDelta ZBool) = BoolChange
+
+instance Patchable ZBool where
+    patch a da = case da of
+                     NotVal   -> (ZBool . not . unZBool) a
+                     NoChange -> a
+    changes a b = if a == b
+                  then NoChange
+                  else NotVal
+
+
+instance Semigroup ZBool where
+    (ZBool a) <> (ZBool b) = ZBool (a || b)
+
+
+ifBigger :: ANum Integer -> BiggerSmaller
+ifBigger (ANum x) = if x > 8 then Bigger else Smaller
+
+
 
 main :: IO ()
 main = do
@@ -168,4 +241,11 @@ main = do
     dd <- execStateT processDudeValue (toPatchedJet startDudeValue)
     putStrLn $ "DudeValue after process: " ++ show (patchedval dd)
     putStrLn $ "DudeValue change: "        ++ show (history dd) --(changes startDudeValue dd)
-  
+    let v = ANum 6
+    let (b, dab) = unZD (liftZDJet ifBigger) $ v
+    putStrLn  $ "v: " ++ show v ++ " b: "++ show b
+    let v' = ANum 9
+    let db = unJetD dab $ changes v v'
+    let b' = patch b db
+    putStrLn $ "v': " ++ show v' ++ " b': " ++ show b'
+

@@ -26,6 +26,7 @@ import GHC.Generics
 
 import Data.Text
 import Data.Semigroup
+--import Data.Maybe
 
 --import Data.Semigroup
 --import Data.Monoid
@@ -35,9 +36,12 @@ import Control.Applicative
 
 type family PatchDelta a
 
+-- unit has no delta
+type instance (PatchDelta ()) = ()
+
 -- |
 -- | A typeclass for data that can be diff'd and patched.
--- | The associated type @Change a@ must be a Monoid since it
+-- | The associated type @PatchDelta a@ must be a Monoid since it
 -- | can be combined with other changes to generate a "combined patch"
 -- | and must support an empty patch.
 -- |
@@ -49,12 +53,11 @@ class (Monoid (PatchDelta a)) => Patchable a where
   -- @changes a b@ generates a @Change a@ that can convert a into b via @patch@
   changes ::  a -> a -> PatchDelta a
 
---
--- AtomicLast is a Patchable type that just replaces the
--- previous value. Efficient for primitive types, but
--- larger data structures should use something more clever
---
-
+-- |
+-- | AtomicLast is a Patchable type that just replaces the
+-- | previous value. Efficient for primitive types, but
+-- | larger data structures should use something more clever
+-- |
 newtype AtomicLast a = AtomicLast a deriving (Eq, Show)
 
 type instance PatchDelta (AtomicLast a) = (Option (Last a))
@@ -75,6 +78,27 @@ instance Applicative AtomicLast where
   pure x = AtomicLast x
   (AtomicLast a) <*> (AtomicLast b) = AtomicLast (a b)
 
+
+  
+--
+-- Patchable instance for functions
+--
+
+type instance PatchDelta ((->) a b) = a -> PatchDelta a -> PatchDelta b
+
+{- type instance PatchDelta ((->) a b) = (a -> b) -> (a -> b)
+
+
+instance (Monoid b, Patchable b) => Patchable ((->) a b) where
+    patch f df = df f
+    changes f f' = \xf -> 
+                        -- we don't know what's in xf, so instead of patching
+                        -- xf directly we patch the return value of xf
+                        \a -> let x = xf a
+                                  b = f a
+                                  b' = f' a
+                              in patch x ((changes x b) <> (changes b b'))
+-}
 --
 -- Patchable Pair
 --
@@ -87,7 +111,6 @@ instance (Semigroup a) => Semigroup (Pair a) where
   
 instance (Monoid a) => Monoid (Pair a) where
   mempty = Ax mempty mempty
-  mappend = (<>)
 
 type instance PatchDelta (Pair a) = Option (Last (Pair a))
 
@@ -100,7 +123,9 @@ instance (Eq a) => Patchable (Pair a) where
                   else Option (Just (Last x1))
                           
 --
--- patchable tuples
+-- | Patchable tuples. In this case we just patch
+-- | each component independently, which may not be what
+-- | you want.
 --
 
 type instance PatchDelta (a,b) = (PatchDelta a, PatchDelta b)
@@ -110,9 +135,9 @@ instance (Patchable a, Patchable b) => Patchable (a,b) where
   changes (a0,b0) (a1,b1) = (changes a0 a1, changes b0 b1)
   
 
---
--- patchable instance for Text
---
+-- |
+-- | Patchable instance for Text, basically works as AtomicLast
+-- |
 
 type instance PatchDelta Text = Option (Last Text)
 
@@ -125,8 +150,8 @@ instance Patchable Text where
                   else Option (Just (Last x1))
 
 --
--- 'Atomic Num' basically a Num type that supports AtomicLast
--- style patching.
+-- | 'Atomic Num' basically a Num type that supports AtomicLast
+-- | style patching.
 --
 newtype ANum a = ANum a deriving (Eq, Show)
 
@@ -239,3 +264,13 @@ changesGeneric a b = to $ changesG (from a) (from b)
   
 --  patch a da = to $ patchG (from a) (from da)
 --  changes a a' = to $ changesG (from a) (from a')
+
+
+--
+-- The patchable for a sum type @a@ has two constructors:
+--  - NewSum @a@ replaces the current val with the new value @a@. For
+--        a sum type this is how you switch to a different constructor
+--  - PatchSum @da@ applies the patch @da@ to the current value. The type
+--        of @da@ is the Patchable of the constructor of the current value.
+--
+

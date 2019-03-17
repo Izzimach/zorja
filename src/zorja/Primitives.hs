@@ -14,17 +14,15 @@ import Data.Text
 import Data.Monoid hiding (Last)
 
 import Zorja.Patchable
+import Zorja.Jet
 
 newtype AtomicInt = AtomicInt Int deriving (Eq, Show)
 
+type instance PatchDelta AtomicInt = Sum Int
+
 instance Patchable AtomicInt where
-    type Change AtomicInt = Option (Last AtomicInt)
-    patch a da = case getOption da of
-                    Nothing -> a
-                    Just (Last a') -> a'
-    changes a b = if (a == b)
-                  then Option Nothing
-                  else Option $ Just (Last b)
+    patch (AtomicInt a) da = AtomicInt (a + (getSum da))
+    changes (AtomicInt a) (AtomicInt b) = Sum $ b - a
 
 instance Num AtomicInt where
     (AtomicInt a) + (AtomicInt b) = AtomicInt (a+b)
@@ -57,8 +55,9 @@ instance Monoid AtomicText where
     mempty = AtomicText mempty
     mappend (AtomicText a) (AtomicText b) = AtomicText (mappend a b)
 
+type instance PatchDelta (AtomicText) = Option (Last AtomicText)
+
 instance Patchable AtomicText where
-    type Change AtomicText = Option (Last AtomicText)
     patch a da = case getOption da of
                     Nothing -> a
                     Just (Last a') -> a'

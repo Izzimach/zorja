@@ -10,14 +10,15 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 
-module Zorja.Collections (
+module Zorja.Collections.PatchableSet (
       PatchableSet (..)
     , empty
     , insert
     , delete
     , member
-    , add
-    , remove
+    , union
+    , intersection
+    , difference
     )
     where
 
@@ -78,6 +79,7 @@ empty = (PatchableSet Set.empty)
 
 --
 -- general destructuring op on PatchedJet (PatchableSet a)
+--
 goPJSet :: PatchedJet (PatchableSet a) 
         -> (Set a -> Set a)
         -> (Set a -> Set a)
@@ -109,18 +111,29 @@ delete a pj = let ia = Set.insert a
 member :: (Ord a) => a -> PatchedJet (PatchableSet a) -> Bool
 member a pj = let (PatchableSet x) = patchedval pj
               in Set.member a x
+              
 --
 -- Applying a union of two PatchedJet values is somewhat confusing, since
--- it's unclear how to merges the two patch histories. So instead a union-like
+-- it's unclear how to merge the two patch histories. So instead a union-like
 -- operation is provided, where it's basically equivalent to a bunch of inserts.
 --
-add :: (Ord a) => Set a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
-add a pj =  let ia = Set.union a
-                da = flip Set.difference a
-            in goPJSet pj ia ia da
 
-remove :: (Ord a) => Set a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
-remove a pj =   let ia = Set.union a
-                    da = flip Set.difference a
-                in goPJSet pj da da ia
+--
+-- for union add all of a to the inserts, and remove any items in a from the
+-- deletes
+--
+union :: (Ord a) => Set a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
+union a pj =  let ia = Set.union a
+                  da = flip Set.difference a
+              in goPJSet pj ia ia da
 
+difference :: (Ord a) => Set a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
+difference a pj =   let ia = Set.union a
+                        da = flip Set.difference a
+                    in goPJSet pj da da ia
+
+intersection :: (Ord a) => Set a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
+intersection a pj = let (PatchableSet x) = (patchedval pj)
+                        -- intersection removes elements of a that aren't in x
+                        removes = Set.difference a x
+                    in difference removes pj                

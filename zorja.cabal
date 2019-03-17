@@ -25,5 +25,6 @@ library
                        mtl,
                        text,
                        generic-deriving,
-                       generic-data
+                       generic-data,
+                       recursion-schemes
                        
