@@ -17,7 +17,7 @@
 module Zorja.Jet where
 
 --
--- access Generic from and to as G.from and G. to
+-- access Generic from and to as G.from and G.to
 --
 import GHC.Generics hiding (from, to)
 import qualified GHC.Generics as G
@@ -43,6 +43,21 @@ toJet x = Jet { position = x, velocity = mempty }
 
 deriving instance (Eq a, Eq (PatchDelta a), Patchable a) => Eq (Jet a)
 deriving instance (Show a, Show (PatchDelta a), Patchable a) => Show (Jet a)
+
+type instance PatchDelta (Jet a) = Jet (PatchDelta a)
+
+--
+-- extracting values and function derivatives from a Jet function
+--
+
+jetfval :: (Patchable a) => (Jet a -> Jet b) -> (a -> b)
+jetfval jf = \a -> position $ jf $ toJet a
+
+jetfderivative :: (Jet a -> Jet b) -> (a -> PatchDelta a -> PatchDelta b)
+jetfderivative jf = \a -> \da -> velocity $ jf (Jet a da)
+
+patchJet :: (Patchable a) => Jet a -> Jet a
+patchJet (Jet a da) = Jet (patch a da) mempty
 
 
 

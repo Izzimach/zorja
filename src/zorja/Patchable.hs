@@ -12,15 +12,15 @@
 {-# LANGUAGE DataKinds #-}
 
 module Zorja.Patchable 
-  (Patchable,
-  patch,
-  changes, 
-   PatchDelta, 
-   AtomicLast(..),
-   ANum(..), 
-   patchGeneric, 
-   changesGeneric)
-  where
+    (Patchable,
+    patch,
+    changes, 
+    PatchDelta, 
+    AtomicLast(..),
+    ANum(..), 
+    patchGeneric, 
+    changesGeneric)
+    where
 
 import GHC.Generics
 
@@ -84,7 +84,17 @@ instance Applicative AtomicLast where
 -- Patchable instance for functions
 --
 
-type instance PatchDelta ((->) a b) = a -> PatchDelta a -> PatchDelta b
+type instance PatchDelta (a -> b) = a -> PatchDelta a -> PatchDelta b
+
+instance (Patchable a, Patchable b) => Patchable (a -> b) where
+    patch f ev = \a -> patch (f a) (ev a mempty)
+    changes f1 f2 = \a -> \da ->
+        -- incorporate both f' and delta-f
+        let b1  = f1 a
+            b1' = f1 (patch a da)
+            b2' = f2 (patch a da)
+        in
+            changes b2' b1
 
 {- type instance PatchDelta ((->) a b) = (a -> b) -> (a -> b)
 
@@ -181,7 +191,8 @@ instance (Eq a) => Patchable (ANum a) where
       then Option Nothing
       else Option (Just (Last x1))
 
-  
+instance (Ord a) => Ord (ANum a) where
+    (ANum a) <= (ANum b) = a <= b
 
 --
 -- Patchable generics, useful for records or extended sum types

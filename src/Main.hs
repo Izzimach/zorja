@@ -34,7 +34,7 @@ import Control.Monad.State
 import Zorja.Patchable
 import Zorja.Jet
 import Zorja.Collections.PatchableSet (PatchableSet)
-import Zorja.ZCCC
+import Zorja.ZHOAS
 import qualified Zorja.Collections.PatchableSet as S
 
 
@@ -118,7 +118,6 @@ instance Semigroup (SomeDude HKDDelta) where
 
 instance Monoid (SomeDude HKDDelta) where
     mempty = SD mempty mempty mempty
-    mappend = (<>)
 
 instance Patchable (SomeDude Identity) where
     patch s ds = patchGeneric s ds
@@ -189,7 +188,6 @@ instance Semigroup (PatchSumType a) where
     
 instance Monoid (PatchSumType a) where
     mempty = NoPatch
-    mappend = (<>)
 
 instance Patchable (BiggerSmaller) where
     patch a da = case da of
@@ -198,54 +196,36 @@ instance Patchable (BiggerSmaller) where
                      NoPatch -> a
     changes _a b = Value b
 
--- Jet for boolean
-data BoolChange = NotVal | NoChange
-
-instance Semigroup (BoolChange) where
-    NotVal <> NotVal = NoChange
-    a <> NoChange = a
-    NoChange <> a = a
-
-instance Monoid (BoolChange) where
-    mempty = NoChange
-    mappend = (<>)
-
-
-newtype ZBool = ZBool { unZBool :: Bool } deriving (Eq)
-
-type instance (PatchDelta ZBool) = BoolChange
-
-instance Patchable ZBool where
-    patch a da = case da of
-                     NotVal   -> (ZBool . not . unZBool) a
-                     NoChange -> a
-    changes a b = if a == b
-                  then NoChange
-                  else NotVal
-
-
-instance Semigroup ZBool where
-    (ZBool a) <> (ZBool b) = ZBool (a || b)
-
 
 ifBigger :: ANum Integer -> BiggerSmaller
 ifBigger (ANum x) = if x > 8 then Bigger else Smaller
 
+
+testProcessDudeValue = do
+    putStrLn $ "Initial DudeValue: " ++ show startDudeValue
+    dd <- execStateT processDudeValue (toPatchedJet startDudeValue)
+    putStrLn $ "DudeValue after process: " ++ show (patchedval dd)
+    putStrLn $ "DudeValue change: "        ++ show (history dd) --(changes startDudeValue dd)
+
+testZHOAS = do
+    let fork = (zLiftIf 
+                    (\a -> ZBool $ a > 8) 
+                    (ZDV Bigger mempty)
+                    (ZDV Smaller mempty))
+    let v  = ANum (6 :: Integer)
+    let v' = ANum (9 :: Integer)
+    let dv = changes v v'
+    let (b,db) = zdEval $ fork `app` (ZDV v dv)
+    putStrLn  $ "v: " ++ show v ++ "     b: "++ show b
+    putStrLn $ "dv: " ++ show dv ++ "     db: " ++ show db
+    let b' = patch b db
+    putStrLn $ "v': " ++ show v' ++ "     b': " ++ show b'
 
 
 main :: IO ()
 main = do
     let x = toJet (AtomicLast (3 :: Integer))
     putStrLn $ show x
-    putStrLn $ "Initial DudeValue: " ++ show startDudeValue
-    dd <- execStateT processDudeValue (toPatchedJet startDudeValue)
-    putStrLn $ "DudeValue after process: " ++ show (patchedval dd)
-    putStrLn $ "DudeValue change: "        ++ show (history dd) --(changes startDudeValue dd)
-    let v = ANum 6
-    let (b, dab) = unZD (liftZDJet ifBigger) $ v
-    putStrLn  $ "v: " ++ show v ++ " b: "++ show b
-    let v' = ANum 9
-    let db = unJetD dab $ changes v v'
-    let b' = patch b db
-    putStrLn $ "v': " ++ show v' ++ " b': " ++ show b'
+
+    testProcessDudeValue
 
