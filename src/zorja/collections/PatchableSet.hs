@@ -19,6 +19,8 @@ module Zorja.Collections.PatchableSet (
     , union
     , intersection
     , difference
+    , inserts
+    , deletes
     )
     where
 
@@ -39,6 +41,10 @@ instance (Ord a) => Semigroup (PatchableSet a) where
 instance (Ord a) => Monoid (PatchableSet a) where
     mempty = PatchableSet Set.empty
     mappend = (<>)
+
+instance Foldable PatchableSet where
+    foldMap fm (PatchableSet a) = foldMap fm a
+
 --
 -- inserts and deletes should be disjoint
 --
@@ -95,22 +101,26 @@ goPJSet pj f1 f2 f3 =
         -- field
         dx' = PSChanges (f2 (inserts dx))
                         (f3 (deletes dx))
-    in PatchedJet x' dx'
+    in
+        PatchedJet x' dx'
 
 
 insert :: (Ord a) => a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
 insert a pj = let ia = Set.insert a
                   da = Set.delete a
-              in goPJSet pj ia ia da
+              in
+                  goPJSet pj ia ia da
 
 delete :: (Ord a) => a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
 delete a pj = let ia = Set.insert a
                   da = Set.delete a
-              in goPJSet pj da da ia
+              in
+                  goPJSet pj da da ia
 
 member :: (Ord a) => a -> PatchedJet (PatchableSet a) -> Bool
 member a pj = let (PatchableSet x) = patchedval pj
-              in Set.member a x
+              in
+                  Set.member a x
               
 --
 -- Applying a union of two PatchedJet values is somewhat confusing, since

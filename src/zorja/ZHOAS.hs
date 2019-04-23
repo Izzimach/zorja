@@ -87,10 +87,10 @@ data ZDExpr a where
     ZDV :: (Patchable a) => a -> PatchDelta a -> ZDExpr a
 
 zdEval :: (Patchable a) => ZDExpr a -> (a, PatchDelta a)
-zdEval (ZDF zf) = let f = \a -> fst $ zdEval $ zf (ZDV a mempty)
-                      df = \a -> \da -> snd $ zdEval $ zf (ZDV a da)
-                  in
-                      (f, df)
+zdEval (ZDF zf)  = let f = \a -> fst $ zdEval $ zf (ZDV a mempty)
+                       df = \a -> \da -> snd $ zdEval $ zf (ZDV a da)
+                   in
+                       (f, df)
 zdEval (ZDV a da) = (a, da)
 
 zdValue :: (Patchable a) => ZDExpr a -> a
@@ -149,26 +149,33 @@ instance Semigroup ZBool where
     (ZBool a) <> (ZBool b) = ZBool (a || b)
 
 
-zLiftIf :: (Patchable a, Patchable b) => (a -> ZBool) -> ZDExpr b -> ZDExpr b -> ZDExpr (a -> b)
-zLiftIf = 
-    \pred -> 
+zIf :: (Patchable a, Patchable b) => ZDExpr (a -> ZBool) -> ZDExpr b -> ZDExpr b -> ZDExpr (a -> b)
+zIf = 
+    \zpred -> 
         \zthen -> 
             \zelse ->
                 lam $ \za ->
-                    let zpred = zLiftFunction pred
-                    in
                     case (zdEval (zpred `app` za)) of
+                        -- if the predicate doesn't change after the delta
+                        -- is applied, we don't have to diff anything
                         (zb, NoChange) -> if (unZBool zb) then zthen else zelse
+                        -- if the predicate result switches values after
+                        -- patching, we have to diff between
+                        -- the then and else clauses
                         (zb, NotVal) ->
-                            let patchexpr = \zval -> let (x,dx) = zdEval zval in patch x dx
+                            let switchbool = \z1 z2 -> 
+                                    let (x1,dx1) = zdEval z1
+                                        (x2,dx2) = zdEval z2
+                                        patchedchanges = changes (patch x1 dx1) (patch x2 dx2)
+                                    in
+                                        ZDV x1 (dx1 <> patchedchanges)
                             in
                                 if (unZBool zb)
                                 then -- true to false
-                                    ZDV (zdValue zthen) (changes (patchexpr zthen) (patchexpr zelse))
+                                    switchbool zthen zelse
                                 else -- false to true
-                                    ZDV (zdValue zelse) (changes (patchexpr zelse) (patchexpr zthen))
-                                                          
-                              
+                                    switchbool zelse zthen
+
 --      
 -- An alternate version of ZDExpr. 
 -- The normal @ZDExpr@ has two fields @a@ and @da@

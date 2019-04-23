@@ -24,6 +24,7 @@ import GHC.Generics
 import Data.Text as T
 --import Data.Semigroup hiding (diff, All)
 import Data.Monoid (Sum(..))
+import Data.Functor.Foldable
 
 import Data.Kind (Constraint, Type)
 
@@ -34,8 +35,11 @@ import Control.Monad.State
 import Zorja.Patchable
 import Zorja.Jet
 import Zorja.Collections.PatchableSet (PatchableSet)
+import Zorja.Collections.FAlgebra
 import Zorja.ZHOAS
 import qualified Zorja.Collections.PatchableSet as S
+
+import Debug.Trace
 
 
 --
@@ -162,6 +166,13 @@ processDudeValue = do
     v3'             %= S.insert 7
     v3'             %= S.delete 4
 
+testProcessDudeValue = do
+    putStrLn $ "Initial DudeValue: " ++ show startDudeValue
+    dd <- execStateT processDudeValue (toPatchedJet startDudeValue)
+    putStrLn $ "DudeValue after process: " ++ show (patchedval dd)
+    putStrLn $ "DudeValue change: "        ++ show (history dd) --(changes startDudeValue dd)
+    
+    
 --
 -- test of sum type using integers
 --
@@ -174,11 +185,12 @@ instance (Patchable SomeNum) where
   patch (SomeNum a) (Sum da) = SomeNum (a + da)
   changes (SomeNum a) (SomeNum b) = Sum (b - a)
 
+
 --
 -- a Simple patchable sum type
 --
 data BiggerSmaller = Bigger | Smaller deriving (Eq, Show)
-data PatchSumType a = Value a | PatchSum a | NoPatch deriving (Eq, Show)
+data PatchSumType a = Value a | NoPatch deriving (Eq, Show)
 
 type instance (PatchDelta BiggerSmaller) = PatchSumType BiggerSmaller
 
@@ -191,31 +203,78 @@ instance Monoid (PatchSumType a) where
 
 instance Patchable (BiggerSmaller) where
     patch a da = case da of
-                     PatchSum b -> b
                      Value b -> b
                      NoPatch -> a
     changes _a b = Value b
 
 
-ifBigger :: ANum Integer -> BiggerSmaller
-ifBigger (ANum x) = if x > 8 then Bigger else Smaller
+--
+-- recursive deltas
+--
 
+zdAdd :: ZDExpr (DNum Integer -> DNum Integer -> DNum Integer)
+zdAdd = lam $ \za ->
+            lam $ \zb ->
+                let (a,da) = zdEval za
+                    (b,db) = zdEval zb
+                in
+                    ZDV (a + b) (da + db)
 
-testProcessDudeValue = do
-    putStrLn $ "Initial DudeValue: " ++ show startDudeValue
-    dd <- execStateT processDudeValue (toPatchedJet startDudeValue)
-    putStrLn $ "DudeValue after process: " ++ show (patchedval dd)
-    putStrLn $ "DudeValue change: "        ++ show (history dd) --(changes startDudeValue dd)
+zDownFixable :: ZDExpr (DNum Integer -> DNum Integer) -> ZDExpr (DNum Integer -> DNum Integer)
+zDownFixable zf = lam $ \zn ->
+                        let nminus1 = zdAdd `app` zn `app` (ZDV (-1) mempty)
+                            ift = zIf (zLiftFunction $ \x -> ZBool (x <= 0))
+                                          (ZDV 0 mempty)
+                                          (zdAdd `app` zn `app` (zf `app` nminus1))
+                        in
+                            ift `app` zn
+
+zDownFixed :: ZDExpr (DNum Integer -> DNum Integer)
+zDownFixed = (fix zDownFixable)
+
+--
+-- experiments with F-Algebra
+--
+
+roseX :: RoseTree
+roseX = RN [
+              RN [ RLeaf 11 ]
+            , RLeaf 3
+            , RLeaf 4
+            ]
+
+roseDX :: RoseTreeDelta
+roseDX = RNChanges 
+            [
+              RNNoChange
+            , RNChanges [] 3
+            , RNReplace $ RN [ RLeaf 10, RLeaf 20 ]
+            ]
+            0
+               
+roseSumNode :: RoseNodeF Integer -> Integer
+roseSumNode (RNF as) = Prelude.foldl (+) 0 as
+roseSumNode (RLeafF x) = x
+
+roseSumTree :: RoseTree -> Integer
+roseSumTree t = cata roseSumNode t
+
+roseDerivativeNode :: RoseNodeF Integer -> RoseNodeDeltaF Integer -> Integer
+roseDerivativeNode 
+
+roseJetTree :: RoseTree -> RoseTreeDelta -> 
+roseSumJet t dt = 
+
 
 testZHOAS = do
-    let fork = (zLiftIf 
-                    (\a -> ZBool $ a > 8) 
-                    (ZDV Bigger mempty)
-                    (ZDV Smaller mempty))
+    let eightIsBig = zIf 
+                        (zLiftFunction $ \a -> ZBool $ a > 8) 
+                        (ZDV Bigger mempty)
+                        (ZDV Smaller mempty)
     let v  = ANum (6 :: Integer)
     let v' = ANum (9 :: Integer)
     let dv = changes v v'
-    let (b,db) = zdEval $ fork `app` (ZDV v dv)
+    let (b,db) = zdEval $ eightIsBig `app` (ZDV v dv)
     putStrLn  $ "v: " ++ show v ++ "     b: "++ show b
     putStrLn $ "dv: " ++ show dv ++ "     db: " ++ show db
     let b' = patch b db

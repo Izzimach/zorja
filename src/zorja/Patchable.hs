@@ -18,6 +18,7 @@ module Zorja.Patchable
     PatchDelta, 
     AtomicLast(..),
     ANum(..), 
+    DNum(..),
     patchGeneric, 
     changesGeneric)
     where
@@ -91,9 +92,9 @@ instance (Patchable a, Patchable b) => Patchable (a -> b) where
     changes f1 f2 = \a -> \da ->
         -- incorporate both f' and delta-f
         let b1  = f1 a
-            b1' = f1 (patch a da)
-            b2' = f2 (patch a da)
-        in
+            b1' = f1 (patch a da)   -- changes b1' b1  is f'
+            b2' = f2 (patch a da)   -- changes b2' b1' is delta-f (patch a da)
+         in
             changes b2' b1
 
 {- type instance PatchDelta ((->) a b) = (a -> b) -> (a -> b)
@@ -163,6 +164,7 @@ instance Patchable Text where
 -- | 'Atomic Num' basically a Num type that supports AtomicLast
 -- | style patching.
 --
+
 newtype ANum a = ANum a deriving (Eq, Show)
 
 type instance PatchDelta (ANum a) = Option (Last a)
@@ -193,6 +195,72 @@ instance (Eq a) => Patchable (ANum a) where
 
 instance (Ord a) => Ord (ANum a) where
     (ANum a) <= (ANum b) = a <= b
+
+--
+-- Patchable type where the delta is the same type as the
+-- actual value. Works for some numbers (Integer) but for others you
+-- have the problem that some values are unrepresentable.  For instance,
+-- (changes a a') on float may produce a delta that is too small to
+-- represent as a float.
+--
+--
+
+newtype DNum a = DNum a deriving (Eq, Show)
+
+type instance PatchDelta (DNum a) = DNum a
+
+instance Functor DNum where
+    fmap f (DNum x) = DNum (f x)
+
+instance Applicative (DNum) where
+    pure x = DNum x
+    (DNum a) <*> (DNum b) = DNum (a b)
+
+instance (Num a) => Semigroup (DNum a) where
+    (DNum a) <> (DNum b) = DNum (a + b)
+
+instance (Num a) => Monoid (DNum a) where
+    mempty = DNum 0
+
+instance (Num a) => Num (DNum a) where
+    a + b = liftA2 (+) a b
+    a * b = liftA2 (*) a b
+    abs a = fmap abs a
+    signum a = fmap signum a
+    negate a = fmap negate a
+    fromInteger n = DNum (fromInteger n)
+
+instance (Num a, Monoid (DNum a)) => Patchable (DNum a) where
+    patch (DNum a) (DNum da) = DNum (a + da)
+    changes (DNum a) (DNum b) = DNum (b - a)
+
+instance (Ord a) => Ord (DNum a) where
+    (DNum a) <= (DNum b) = a <= b
+
+
+--
+-- patchable lists
+--
+
+data ListDelta a = PatchNode (PatchDelta a) (ListDelta a)
+                 | KeepList
+
+type instance (PatchDelta [a]) = ListDelta a
+
+instance (Patchable a) => Semigroup (ListDelta a) where
+    a <> KeepList = a
+    KeepList <> a = a
+    (PatchNode a as) <> (PatchNode a' as') = PatchNode (a <> a') (as <> as')
+
+instance (Patchable a) => Monoid (ListDelta a) where
+    mempty = KeepList
+
+instance (Patchable a) => Patchable [a] where
+    patch x KeepList = x
+    patch (x:xs) (PatchNode da das) = (patch x da) : patch xs das
+    patch [] (PatchNode _ _) = undefined   -- can't patch empty node!
+    patch (x:xs) (PatchNode a as) = (patch x a) : patch xs as
+    changes x x' = undefined
 
 --
 -- Patchable generics, useful for records or extended sum types
