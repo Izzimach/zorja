@@ -146,20 +146,6 @@ instance (Patchable a, Patchable b) => Patchable (a,b) where
   changes (a0,b0) (a1,b1) = (changes a0 a1, changes b0 b1)
   
 
--- |
--- | Patchable instance for Text, basically works as AtomicLast
--- |
-
-type instance PatchDelta Text = Option (Last Text)
-
-instance Patchable Text where
-  patch x dx = case getOption dx of
-    Nothing -> x
-    Just dx' -> getLast dx'
-  changes x0 x1 = if x0 == x1
-                  then Option Nothing
-                  else Option (Just (Last x1))
-
 --
 -- | 'Atomic Num' basically a Num type that supports AtomicLast
 -- | style patching.
