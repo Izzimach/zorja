@@ -56,41 +56,20 @@ instance ZHOAS ZE where
 -- incur any runtime overhead.
 --
 
---
--- we have ev :: (a -> b) -> a -> b
--- which is basically apply
---  ev f a = (f a)
---
--- We need a derivative ev' which takes into account both
--- (PatchDelta f) and (PatchDelta a).
---
--- At this point we need f' which is made accessable by changing
--- f :: (a -> b)
---    into
--- f :: (ZDExpr a -> ZDExpr b)
---
--- and so ev' is
---
--- ev' :: ZDExpr (ZDExpr a -> ZDExpr b) -> ZDExpr a -> ZDExpr b
---
--- there are two formulations from "Fixing Incremental Computation"
---
--- 1) ev' (ZDExpr f df) (ZDExpr a da) = (f' a da) <> (df (patch a da))
--- 2) ev' (ZDExpr f df) (ZDExpr a da) = (df a) <> ((patch f df)' a da)
---
--- It's unclear when one formulation is "better" than the other.
--- So it makes sense to use the one that is easier to code/understand.
---
+-- For Functions @f@ the delta @df@ contains both the derivative @f'@ and
+-- the function delta @Del f@ which holds deltas due to applied arguments.
+-- This all gets wrapped up into (ZDExpr a -> ZDExpr b) so it's not
+-- obvious here.
 
 data ZDExpr a where
     ZDF :: (Patchable a, Patchable b) => (ZDExpr a -> ZDExpr b) -> ZDExpr (a -> b)
     ZDV :: (Patchable a) => a -> PatchDelta a -> ZDExpr a
 
 zdEval :: (Patchable a) => ZDExpr a -> (a, PatchDelta a)
-zdEval (ZDF zf)  = let f = \a -> fst $ zdEval $ zf (ZDV a mempty)
-                       df = \a -> \da -> snd $ zdEval $ zf (ZDV a da)
-                   in
-                       (f, df)
+zdEval (ZDF zf)   = let f  = \a ->        zdValue $ zf (ZDV a mempty)
+                        df = \a -> \da -> zdPatch $ zf (ZDV a da)
+                    in
+                        (f, df)
 zdEval (ZDV a da) = (a, da)
 
 zdValue :: (Patchable a) => ZDExpr a -> a
@@ -177,7 +156,7 @@ zIf =
                                     switchbool zelse zthen
 
 --      
--- An alternate version of ZDExpr. 
+-- An experimental version of ZDExpr. 
 -- The normal @ZDExpr@ has two fields @a@ and @da@
 -- For example a function would look like
 -- @ZDE (a -> b) (a -> da -> db)@

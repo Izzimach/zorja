@@ -25,7 +25,7 @@ module Zorja.Patchable
 
 import GHC.Generics
 
-import Data.Text
+--import Data.Text
 import Data.Semigroup
 --import Data.Maybe
 
@@ -59,6 +59,7 @@ class (Monoid (PatchDelta a)) => Patchable a where
 -- | previous value. Efficient for primitive types, but
 -- | larger data structures should use something more clever
 -- |
+
 newtype AtomicLast a = AtomicLast a deriving (Eq, Show)
 
 type instance PatchDelta (AtomicLast a) = (Option (Last a))
@@ -92,7 +93,7 @@ instance (Patchable a, Patchable b) => Patchable (a -> b) where
     changes f1 f2 = \a -> \da ->
         -- incorporate both f' and delta-f
         let b1  = f1 a
-            b1' = f1 (patch a da)   -- changes b1' b1  is f'
+            --b1' = f1 (patch a da)   -- changes b1' b1  is f'
             b2' = f2 (patch a da)   -- changes b2' b1' is delta-f (patch a da)
          in
             changes b2' b1
@@ -189,6 +190,7 @@ instance (Ord a) => Ord (ANum a) where
 -- (changes a a') on float may produce a delta that is too small to
 -- represent as a float.
 --
+-- Monoid behavior is that of (Sum v)
 --
 
 newtype DNum a = DNum a deriving (Eq, Show)
@@ -243,10 +245,9 @@ instance (Patchable a) => Monoid (ListDelta a) where
 
 instance (Patchable a) => Patchable [a] where
     patch x KeepList = x
-    patch (x:xs) (PatchNode da das) = (patch x da) : patch xs das
-    patch [] (PatchNode _ _) = undefined   -- can't patch empty node!
     patch (x:xs) (PatchNode a as) = (patch x a) : patch xs as
-    changes x x' = undefined
+    patch [] _x = undefined   -- can't patch empty node!
+    changes _x _x' = undefined
 
 --
 -- Patchable generics, useful for records or extended sum types

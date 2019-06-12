@@ -22,7 +22,7 @@ module Main where
 
 import GHC.Generics
 
-import Data.Text as T
+import Data.Text as T hiding (zipWith, zip)
 --import Data.Semigroup hiding (diff, All)
 import Data.Monoid (Sum(..))
 import Data.Functor.Foldable
@@ -32,6 +32,7 @@ import Data.Kind (Constraint, Type)
 import Control.Lens hiding (from, to)
 --import Control.Lens.Tuple
 import Control.Monad.State
+import Control.Comonad
 
 import Zorja.Patchable
 import Zorja.Jet
@@ -224,9 +225,9 @@ zdAdd = lam $ \za ->
 zDownFixable :: ZDExpr (DNum Integer -> DNum Integer) -> ZDExpr (DNum Integer -> DNum Integer)
 zDownFixable zf = lam $ \zn ->
                         let nminus1 = zdAdd `app` zn `app` (ZDV (-1) mempty)
-                            ift = zIf (zLiftFunction $ \x -> ZBool (x <= 0))
-                                          (ZDV 0 mempty)
-                                          (zdAdd `app` zn `app` (zf `app` nminus1))
+                            ift = zIf   (zLiftFunction $ \x -> ZBool (x <= 0)) -- predicate
+                                        (ZDV 0 mempty)                         -- then result
+                                        (zdAdd `app` zn `app` (zf `app` nminus1)) -- else result
                         in
                             ift `app` zn
 
@@ -237,35 +238,27 @@ zDownFixed = (fix zDownFixable)
 -- experiments with F-Algebra
 --
 
-roseX :: RoseTree
-roseX = RN [
-              RN [ RLeaf 11 ]
-            , RLeaf 3
-            , RLeaf 4
+roseX :: (Applicative f) => RoseTree (f Integer)
+roseX = RN  [
+              RN [ RLeaf $ pure 11 ]
+            , RLeaf $ pure 3
+            , RLeaf $ pure 4
             ]
 
-roseDX :: RoseTreeDelta
+roseDX :: (Applicative f, Semigroup (f Integer), Eq (f Integer), Patchable (f Integer)) => RoseTreeDelta (f Integer)
 roseDX = RNChanges 
             [
               RNNoChange
-            , RNChanges [] 3
-            , RNReplace $ RN [ RLeaf 10, RLeaf 20 ]
+            , (changes (RLeaf $ pure 4) (RLeaf $ pure 7))
+            , RNReplace $ RN [ RLeaf $ pure 10, RLeaf $ pure 20 ]
             ]
-            0
-               
-roseSumNode :: RoseNodeF Integer -> Integer
-roseSumNode (RNF as) = Prelude.foldl (+) 0 as
-roseSumNode (RLeafF x) = x
+            mempty
 
-roseSumTree :: RoseTree -> Integer
-roseSumTree t = cata roseSumNode t
 
-roseDerivativeNode :: RoseNodeF Integer -> RoseNodeDeltaF Integer -> Integer
-roseDerivativeNode 
 
-roseJetTree :: RoseTree -> RoseTreeDelta -> 
-roseSumJet t dt = 
 
+--buildJetTree :: (RoseTree, RoseTreeDelta) -> RoseNodeJetF (RoseTree, RoseTreeDelta)
+--buildJetTree (t,dt) = RNJ 
 
 testZHOAS = do
     let eightIsBig = zIf 
