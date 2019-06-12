@@ -20,6 +20,10 @@ import Data.Kind (Constraint)
 -- types and compose them using `zdot` which is equivalent to (.)
 
 
+--
+-- Definition of Category including constraints
+--
+
 class ZCategory k where
   type Ok k a :: Constraint
   type Ok k a = Patchable a
@@ -29,6 +33,19 @@ class ZCategory k where
 type Ok2 k a b = (Ok k a, Ok k b)
 type Ok3 k a b c = (Ok k a, Ok k b, Ok k c)
 
+--
+-- For a given pair of types a and b, we need two functions:
+--  a -> b
+--  PatchDelta a -> PatchDelta b
+--
+-- The first one is just the (->) constructor. We use
+-- JetD to represent the second function.
+--
+-- So for a `k` b:
+--    k = (->) gives a normal function (a -> b)
+--    k = JetD gives a delta function (PatchDelta a -> PatchDelta b)
+--
+
 newtype JetD a b = JetD { unJetD :: PatchDelta a -> PatchDelta b }
 
 instance ZCategory (JetD) where
@@ -36,11 +53,16 @@ instance ZCategory (JetD) where
   id                         = JetD (\x -> x)
   zdot (JetD zbc) (JetD zab) = JetD (zbc . zab)
 
-newtype ZD k a b = ZD { unZD :: a -> (b, a `k` b) }
 
 --
--- for our purposes here the 'k' is always JetD
+-- ZD represents the compacted form of incremental functions described in
+-- compiling to categories: (a -> (b, PatchDelta a -> PatchDelta b))
 --
+-- Where k is JetD
+--
+
+newtype ZD k a b = ZD { unZD :: a -> (b, a `k` b) }
+
 instance ZCategory k => ZCategory (ZD k) where
   type Ok (ZD k) a = Ok k a
   id           = ZD $ \a -> (a,Zorja.ZCCC.id)
