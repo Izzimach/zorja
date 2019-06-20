@@ -38,6 +38,7 @@ test-suite zorja-test
   main-is:             TestRoot.hs
   hs-source-dirs:      test, src
   ghc-options:         -Wall -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
+  default-language:    Haskell2010
   other-modules:       Zorja.Patchable
   build-depends:       base >= 4.7 && < 5,
                        zorja,
