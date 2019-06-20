@@ -80,8 +80,6 @@ instance Applicative AtomicLast where
   pure x = AtomicLast x
   (AtomicLast a) <*> (AtomicLast b) = AtomicLast (a b)
 
-
-  
 --
 -- Patchable instance for functions
 --
