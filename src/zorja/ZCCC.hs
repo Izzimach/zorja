@@ -56,9 +56,9 @@ instance ZCategory (JetD) where
 
 --
 -- ZD represents the compacted form of incremental functions described in
--- compiling to categories: (a -> (b, PatchDelta a -> PatchDelta b))
+-- compiling to categories: @a -> (b, PatchDelta a -> PatchDelta b)@
 --
--- Where k is JetD
+-- Here @PatchDelta a -> PatchDelta b@ is @a `k` b@ where @k@ is @JetD@
 --
 
 newtype ZD k a b = ZD { unZD :: a -> (b, a `k` b) }
@@ -78,7 +78,7 @@ instance ZCategory k => ZCategory (ZD k) where
 
 liftZDJet :: (Ok2 JetD a b, Patchable a, Patchable b) => (a -> b) -> ZD JetD a b
 liftZDJet f = ZD $ \a -> let b = f a
-                       in (b,
-                           JetD $ \da -> let b' = f $ patch a da
-                                         in (changes b b'))
+                         in (b,
+                             JetD $ \da -> let b' = f $ patch a da
+                                           in (changes b b'))
 
