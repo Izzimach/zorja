@@ -49,12 +49,12 @@ instance Foldable PatchableSet where
 -- inserts and deletes should be disjoint
 --
 
-data PatchableSetChanges a = PSChanges {
+data UpDownSet a = UpDownSet {
       inserts :: Set a
     , deletes :: Set a
     } deriving (Eq, Show)
 
-instance (Ord a) => Semigroup (PatchableSetChanges a) where
+instance (Ord a) => Semigroup (UpDownSet a) where
     a <> b =  let ia = inserts a
                   da = deletes a
                   ib = inserts b
@@ -63,14 +63,14 @@ instance (Ord a) => Semigroup (PatchableSetChanges a) where
                   --
                   -- patch a (da <> db) = patch (patch a da) db
                   --
-                  PSChanges ((Set.difference ia db) `Set.union` ib)
+                  UpDownSet ((Set.difference ia db) `Set.union` ib)
                             ((Set.difference da ib) `Set.union` db)
 
-instance (Ord a) => Monoid (PatchableSetChanges a) where
-    mempty = PSChanges Set.empty Set.empty
+instance (Ord a) => Monoid (UpDownSet a) where
+    mempty = UpDownSet Set.empty Set.empty
     mappend = (<>)
 
-type instance (PatchDelta (PatchableSet a)) = PatchableSetChanges a
+type instance (PatchDelta (PatchableSet a)) = UpDownSet a
 
 instance (Ord a) => Patchable (PatchableSet a) where
     patch (PatchableSet a) da = PatchableSet $
@@ -78,7 +78,7 @@ instance (Ord a) => Patchable (PatchableSet a) where
     changes (PatchableSet a) (PatchableSet b) = 
         let inserts' = Set.difference b a
             deletes' = Set.difference a b
-        in PSChanges inserts' deletes'
+        in UpDownSet inserts' deletes'
 
 empty :: (PatchableSet a)
 empty = (PatchableSet Set.empty)
@@ -99,7 +99,7 @@ goPJSet pj f1 f2 f3 =
         -- inserts and deletes must be disjoint, so if we add @a@ to
         -- the @inserts@ field we must make sure it isn't in the @deletes@
         -- field
-        dx' = PSChanges (f2 (inserts dx))
+        dx' = UpDownSet (f2 (inserts dx))
                         (f3 (deletes dx))
     in
         PatchedJet x' dx'
