@@ -64,6 +64,13 @@ newtype AtomicLast a = AtomicLast a deriving (Eq, Show)
 
 type instance PatchDelta (AtomicLast a) = (Option (Last a))
 
+instance (Semigroup a) => Semigroup (AtomicLast a) where
+    (AtomicLast a) <> (AtomicLast b) = AtomicLast (a <> b)
+
+instance (Monoid a) => Monoid (AtomicLast a) where
+    mempty = AtomicLast mempty
+    
+
 instance (Eq a) => Patchable (AtomicLast a) where
   patch a da = case getOption da of
                  Nothing -> a
