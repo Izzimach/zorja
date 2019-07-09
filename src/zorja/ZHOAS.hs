@@ -1,7 +1,9 @@
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Zorja.ZHOAS where
 
@@ -72,11 +74,36 @@ zdEval (ZDF zf)   = let f  = \a ->        zdValue $ zf (ZDV a mempty)
                         (f, df)
 zdEval (ZDV a da) = (a, da)
 
+instance (Patchable a, Show a, Show (PatchDelta a)) => Show (ZDExpr a) where
+    show (ZDF zf) = "(ZDExpr Function)"
+    show (ZDV a da) = "(ZDExpr Value: " ++ show a ++ "," ++ show da ++ ")"
+
+--
+-- Functor type for ZDExprs. For this to work both a and da must be
+-- functors.
+--
+class ZDFunctor (zf :: * -> *) where
+    zdmap :: ZDExpr (a -> b) -> ZDExpr (zf a) -> ZDExpr (zf b)
+
+class ZDStructFunctor (zf :: * -> *) where
+    zdstructuremap :: (StructurePatchable a, StructurePatchable b) =>
+             ZDExpr (a -> b) -> ZDExpr (zf a) -> ZDExpr (zf b)
+
+--
+-- Distributive typeclass over ZDExpr. Needed for catamorphism and friends
+--
+class ZDDistributive (zf :: * -> *) where
+    zddist :: (StructurePatchable a) => ZDExpr (zf a) -> zf (ZDExpr a)
+
 zdValue :: (Patchable a) => ZDExpr a -> a
 zdValue zv = fst $ zdEval zv
 
 zdPatch :: (Patchable a) => ZDExpr a -> PatchDelta a
 zdPatch zv = snd $ zdEval zv
+
+zdCompose :: (Patchable a, Patchable b, Patchable c) =>
+  ZDExpr (b -> c) -> ZDExpr (a -> b) -> ZDExpr (a -> c)
+zdCompose zbc zab = lam $ (app zbc) . (app zab)
 
 instance ZHOAS ZDExpr where
     type ZOk ZDExpr a = Patchable a
@@ -95,6 +122,20 @@ zLiftFunction f = ZDV f df
                               changes b b'
 
 
+--
+-- A property of some data structures is that they
+-- can represent adding or removing an element as a ZDExpr,
+-- so they can be embedded into a structural changing data structure.
+--
+data SDExpr a =
+      SDJust (ZDExpr a)
+    | SDAdd a
+    | SDDelete a
+
+class (Patchable a) => StructurePatchable a where
+    fromSDExpr :: SDExpr a -> ZDExpr a
+    toSDExpr :: ZDExpr a -> SDExpr a
+ 
 --
 -- Bool and if for ZDExpr
 --
