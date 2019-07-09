@@ -29,6 +29,7 @@ library
                        generic-data,
                        recursion-schemes,
                        comonad,
+                       distributive,
                        free,
                        vector,
                        edit-distance-vector
