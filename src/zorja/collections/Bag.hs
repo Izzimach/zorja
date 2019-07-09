@@ -25,7 +25,8 @@ module Zorja.Collections.Bag (
     )
     where
 
-import Prelude hiding (concat, map)
+import Prelude hiding (concat, map, negate)
+import qualified Prelude as Prelude
 
 import Data.Semigroup
 import Data.Monoid
@@ -42,7 +43,7 @@ type BagCount = Int
 -- | A Bag is a Set where each element has an associated non-zero count
 newtype Bag a = Bag { unBag :: Map a BagCount }
 
---| Bags are their own deltas
+-- | Bags are their own deltas
 type instance PatchDelta (Bag a) = Bag a
 
 instance Ord a => Semigroup (Bag a) where
@@ -89,8 +90,8 @@ map :: Ord b => (a -> b) -> Bag a -> Bag b
 map f (Bag m) = Bag $ Map.mapKeysWith (+) f m
 
 -- | Returns true if the key @k@ /has a count greater than zero/
-member :: Ord k => k -> Bag a -> Bool
-member x (Bag b) = case (lookup x b) of
+member :: Ord a => a -> Bag a -> Bool
+member x (Bag b) = case (Map.lookup x b) of
                        Nothing -> False
                        Just v  -> (v > 0)
 
