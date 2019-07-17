@@ -32,6 +32,7 @@ library
                        distributive,
                        free,
                        vector,
+                       groups,
                        edit-distance-vector
 
 test-suite zorja-test
