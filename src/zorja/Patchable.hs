@@ -8,87 +8,150 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Zorja.Patchable 
-    (Patchable,
+module Zorja.Patchable (
+    Patchable,
     patch,
     changes, 
-    PatchDelta, 
-    AtomicLast(..),
-    ANum(..), 
-    DNum(..),
+    PatchDelta,
+    UnPatchDelta,
+    ReplaceOnly(..),
+    Replacing(..),
+    SelfDelta,
+    FunctorDelta,
+    SelfPatchable(..),
     patchGeneric, 
-    changesGeneric)
+    changesGeneric
+    )
     where
 
 import GHC.Generics
 
---import Data.Text
+import Data.Kind
+import Data.Functor.Identity
 import Data.Semigroup
---import Data.Maybe
+import Data.Group
 
---import Data.Semigroup
---import Data.Monoid
 import Control.Applicative
 
---import Control.Lens.Tuple
+-- | For a type @a@ there is a delta @PatchDelta a@ that describes how to
+--   make changes to @a@ and produce a new value :@patch a (PatchDelta a) = a'@
+--
+--   We make @PatchDelta@ injective which is a little inconvenient.  It means
+--   no two types can have the same type for @PatchDelta@ but it also gives
+--   the typechecker more hints to properly digest complex types that use @PatchDelta@.
 
-type family PatchDelta a
+type family PatchDelta a = da | da -> a
+type family UnPatchDelta da = a | a -> da
 
--- unit has no delta
+-- | Certain types have a functor relationship to their delta, so that
+-- @PatchDelta a@ can be expressed as @f a@ where @f@ is a functor.
+
+--type family FunctorDelta (f :: Type -> Type) = (a :: Type -> Type) | a -> f
+type family FunctorDelta (f :: Type -> Type) = (a :: Type -> Type) | a -> f
+
+
+-- | unit is it's own delta
 type instance (PatchDelta ()) = ()
+type instance (UnPatchDelta ()) = ()
+
+
 
 -- |
 -- | A typeclass for data that can be diff'd and patched.
 -- | The associated type @PatchDelta a@ must be a Monoid since it
 -- | can be combined with other changes to generate a "combined patch"
--- | and must support an empty patch.
+-- | and must support an empty patch. Note that this monoid combines small
+-- | patches into a single bigger patch, which may be different behavior than
+-- | some default Monoid instance for that type. You may have to use a @newtype@
+-- | wrapper to distinguish the two.
 -- |
--- | @patch a (changes a b) = b@
+-- | @patch x (changes x x') = x'@
 
 class (Monoid (PatchDelta a)) => Patchable a where
-  -- @patch a da@ applies the changes in @da@ to @a@
+  -- | @patch x dx@ applies the changes in @dx@ to @x@
   patch :: a -> PatchDelta a -> a
-  -- @changes a b@ generates a @Change a@ that can convert a into b via @patch@
+  -- | @changes x x'@ generates a @dx :: PatchDelta a@ that can convert @x@ into @x'@ using @patch@
   changes ::  a -> a -> PatchDelta a
 
+-- | Some data types are their own delta. We can mark this with a typeclass
+-- | See also @SelfPatchable@ which converts any @Group@ into a @SelfDelta@
+
+class (Patchable a) => SelfDelta a where
+  valueToDelta :: a -> PatchDelta a
+  deltaToValue :: PatchDelta a -> a
+
+
+
 -- |
--- | AtomicLast is a Patchable type that just replaces the
+-- | ReplaceOnly is a Patchable type that just replaces the
 -- | previous value. Efficient for primitive types, but
 -- | larger data structures should use something more clever
 -- |
 
-newtype AtomicLast a = AtomicLast a deriving (Eq, Show)
+newtype ReplaceOnly a = ReplaceOnly a
+    deriving (Eq, Show)
 
-type instance PatchDelta (AtomicLast a) = (Option (Last a))
+newtype Replacing a = Replacing (Option (Last a))
+    deriving (Eq, Show)
 
-instance (Semigroup a) => Semigroup (AtomicLast a) where
-    (AtomicLast a) <> (AtomicLast b) = AtomicLast (a <> b)
+type instance PatchDelta (ReplaceOnly a) = Replacing a
+type instance FunctorDelta ReplaceOnly = Replacing
 
-instance (Monoid a) => Monoid (AtomicLast a) where
-    mempty = AtomicLast mempty
+instance (Semigroup a) => Semigroup (ReplaceOnly a) where
+    (ReplaceOnly a) <> (ReplaceOnly b) = ReplaceOnly (a <> b)
+
+instance (Monoid a) => Monoid (ReplaceOnly a) where
+    mempty = ReplaceOnly mempty
+
+instance (Eq a) => Patchable (ReplaceOnly a) where
+  patch a (Replacing da) =
+      case getOption da of
+          Nothing -> a
+          Just (Last a') -> ReplaceOnly a'
+  changes (ReplaceOnly a) (ReplaceOnly b) =
+      if (a == b)
+      then Replacing $ Option Nothing
+      else Replacing $ Option $ Just $ Last b
+
+instance Functor ReplaceOnly where
+    fmap f (ReplaceOnly x) = ReplaceOnly (f x)
+
+instance Applicative ReplaceOnly where
+    pure x = ReplaceOnly x
+    (ReplaceOnly a) <*> (ReplaceOnly b) = ReplaceOnly (a b)
+
+instance (Num a) => Num (ReplaceOnly a) where
+    a + b = liftA2 (+) a b
+    a * b = liftA2 (*) a b
+    abs a = fmap abs a
+    signum a = fmap signum a
+    negate a = fmap negate a
+    fromInteger n = ReplaceOnly (fromInteger n)
+
+instance (Ord a) => Ord (ReplaceOnly a) where
+    (ReplaceOnly a) <= (ReplaceOnly b) = a <= b
+
+
+instance Functor Replacing where
+    fmap f (Replacing a) = Replacing $ fmap (fmap f) a
+
+instance Applicative Replacing where
+    pure x = Replacing $ pure $ pure x
+    (Replacing fab) <*> (Replacing a) = Replacing (liftA2 (<*>) fab a)
+
+instance Semigroup (Replacing a) where
+    (Replacing a) <> (Replacing b) = Replacing (a <> b)
+
+instance Monoid (Replacing a) where
+    mempty = Replacing mempty
     
-
-instance (Eq a) => Patchable (AtomicLast a) where
-  patch a da = case getOption da of
-                 Nothing -> a
-                 Just (Last a') -> AtomicLast a'
-  changes (AtomicLast a) (AtomicLast b) =
-    if (a == b)
-    then Option Nothing
-    else Option $ Just (Last b)
-
-instance Functor AtomicLast where
-  fmap f (AtomicLast x) = AtomicLast (f x)
-
-instance Applicative AtomicLast where
-  pure x = AtomicLast x
-  (AtomicLast a) <*> (AtomicLast b) = AtomicLast (a b)
-
+    
 --
--- Patchable instance for functions
+-- | Patchable instance for functions
 --
 
 type instance PatchDelta (a -> b) = a -> PatchDelta a -> PatchDelta b
@@ -96,14 +159,30 @@ type instance PatchDelta (a -> b) = a -> PatchDelta a -> PatchDelta b
 instance (Patchable a, Patchable b) => Patchable (a -> b) where
     patch f ev = \a -> patch (f a) (ev a mempty)
     changes f1 f2 = \a -> \da ->
-        -- incorporate both f' and delta-f
+        --
+        -- Incorporate both f' and delta-f:
+        --
+        -- f' uses the change da:
+        --   b1' = (f1 a) + (f1' a da)
+        --
+        -- delta-f doesn't handle the change da. Instead it is the change between f1
+        -- and f2 when they are given the same argument value:
+        --   "delta-f at a" = changes (f1 a) (f2 a)
+        --   "delta-f at a'" = changes (f1 a') (f2 a')
+        -- Note that delta-f may be different at different values of a
+        -- 
+        -- 
         let b1  = f1 a
-            --b1' = f1 (patch a da)   -- changes b1' b1  is f'
-            b2' = f2 (patch a da)   -- changes b2' b1' is delta-f (patch a da)
-         in
+            a' = patch a da
+            --b1' = f1 a'           -- this represents (f1 a) + (f1' a da)
+            b2' = f2 a'             -- delta-f from f1 to f2 at a':
+                                    -- changes (f1 a) (f2 a) is delta-f at a
+                                    -- changes (f1 a') (f2 a') is delta-f at a'
+        in
+            -- (changes b2' b1') <> (changes b1' b1) = changes b2' b1
             changes b2' b1
 
-{- type instance PatchDelta ((->) a b) = (a -> b) -> (a -> b)
+{- type inst  ance PatchDelta ((->) a b) = (a -> b) -> (a -> b)
 
 
 instance (Monoid b, Patchable b) => Patchable ((->) a b) where
@@ -116,119 +195,68 @@ instance (Monoid b, Patchable b) => Patchable ((->) a b) where
                                   b' = f' a
                               in patch x ((changes x b) <> (changes b b'))
 -}
---
--- Patchable Pair
---
 
-data Pair a = Ax a a deriving (Eq, Show, Generic)
-
-
-instance (Semigroup a) => Semigroup (Pair a) where
-  (Ax a b) <> (Ax a' b') = Ax (a <> a') (b <> b')
-  
-instance (Monoid a) => Monoid (Pair a) where
-  mempty = Ax mempty mempty
-
-type instance PatchDelta (Pair a) = Option (Last (Pair a))
-
-instance (Eq a) => Patchable (Pair a) where
-  patch x dx = case getOption dx of
-    Nothing -> x
-    Just dx' -> getLast dx'
-  changes x0 x1 = if x0 == x1
-                  then Option Nothing
-                  else Option (Just (Last x1))
-                          
 --
 -- | Patchable tuples. In this case we just patch
--- | each component independently, which may not be what
--- | you want.
+--   each component independently, which may not be what
+--   you want.
 --
 
 type instance PatchDelta (a,b) = (PatchDelta a, PatchDelta b)
 
 instance (Patchable a, Patchable b) => Patchable (a,b) where
-  patch (a,b) (da,db) = (patch a da, patch b db)
-  changes (a0,b0) (a1,b1) = (changes a0 a1, changes b0 b1)
+    patch (a,b) (da,db) = (patch a da, patch b db)
+    changes (a0,b0) (a1,b1) = (changes a0 a1, changes b0 b1)
   
 
 --
--- | 'Atomic Num' basically a Num type that supports AtomicLast
--- | style patching.
+-- | If a is a group, we can generate a Patchable type where the 
+--   delta is the same type as the actual value.
+--   Patches are performed using semigroup (<>).
+--   Works for some numbers (Integer) but for others you
+--   have the problem that some values are unrepresentable.  For instance,
+--   (changes a a') on float may produce a delta that is too small to
+--   represent as a float.
+--
+--   We need @a@ to be a group since computing @changes@ requires the inverse of @a@
 --
 
-newtype ANum a = ANum a deriving (Eq, Show)
+data SelfPatchable a = SelfPatchable a deriving (Eq, Show)
 
-type instance PatchDelta (ANum a) = Option (Last a)
 
-instance Functor ANum where
-  fmap f (ANum x) = ANum (f x)
+type instance PatchDelta (SelfPatchable a) = SelfPatchable a
 
-instance Applicative (ANum) where
-  pure x = ANum x
-  (ANum a) <*> (ANum b) = ANum (a b)
+instance (Group a) => SelfDelta (SelfPatchable a) where
+    valueToDelta a = a
+    deltaToValue da = da
+    
+instance Functor SelfPatchable where
+    fmap f (SelfPatchable x) = SelfPatchable (f x)
 
-instance (Num a) => Num (ANum a) where
-  a + b = liftA2 (+) a b
-  a * b = liftA2 (*) a b
-  abs a = fmap abs a
-  signum a = fmap signum a
-  negate a = fmap negate a
-  fromInteger n = ANum (fromInteger n)
+instance Applicative (SelfPatchable) where
+    pure x = SelfPatchable x
+    (SelfPatchable a) <*> (SelfPatchable b) = SelfPatchable (a b)
 
-instance (Eq a) => Patchable (ANum a) where
-  patch x dx = case getOption dx of
-    Nothing -> x
-    Just dx' -> ANum (getLast dx')
-  changes (ANum x0) (ANum x1) =
-      if x0 == x1
-      then Option Nothing
-      else Option (Just (Last x1))
+instance (Semigroup a) => Semigroup (SelfPatchable a) where
+    (SelfPatchable a) <> (SelfPatchable b) = SelfPatchable (a <> b)
 
-instance (Ord a) => Ord (ANum a) where
-    (ANum a) <= (ANum b) = a <= b
+instance (Monoid a) => Monoid (SelfPatchable a) where
+    mempty = SelfPatchable mempty
 
---
--- Patchable type where the delta is the same type as the
--- actual value. Works for some numbers (Integer) but for others you
--- have the problem that some values are unrepresentable.  For instance,
--- (changes a a') on float may produce a delta that is too small to
--- represent as a float.
---
--- Monoid behavior is that of (Sum v)
---
-
-newtype DNum a = DNum a deriving (Eq, Show)
-
-type instance PatchDelta (DNum a) = DNum a
-
-instance Functor DNum where
-    fmap f (DNum x) = DNum (f x)
-
-instance Applicative (DNum) where
-    pure x = DNum x
-    (DNum a) <*> (DNum b) = DNum (a b)
-
-instance (Num a) => Semigroup (DNum a) where
-    (DNum a) <> (DNum b) = DNum (a + b)
-
-instance (Num a) => Monoid (DNum a) where
-    mempty = DNum 0
-
-instance (Num a) => Num (DNum a) where
+instance (Num a) => Num (SelfPatchable a) where
     a + b = liftA2 (+) a b
     a * b = liftA2 (*) a b
     abs a = fmap abs a
     signum a = fmap signum a
     negate a = fmap negate a
-    fromInteger n = DNum (fromInteger n)
+    fromInteger n = SelfPatchable (fromInteger n)
 
-instance (Num a, Monoid (DNum a)) => Patchable (DNum a) where
-    patch (DNum a) (DNum da) = DNum (a + da)
-    changes (DNum a) (DNum b) = DNum (b - a)
+instance (Group a) => Patchable (SelfPatchable a) where
+    patch (SelfPatchable a) (SelfPatchable da) = SelfPatchable (a <> da)
+    changes (SelfPatchable a) (SelfPatchable b) = SelfPatchable ((invert a) <> b)
 
-instance (Ord a) => Ord (DNum a) where
-    (DNum a) <= (DNum b) = a <= b
+instance (Ord a) => Ord (SelfPatchable a) where
+    (SelfPatchable a) <= (SelfPatchable b) = a <= b
 
 
 --
