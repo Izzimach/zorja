@@ -1,6 +1,6 @@
 name:                zorja
 version:             0.1.0.0
--- synopsis:
+synopsis:            Incremental Lambda Calculus, including Cofree Comonads
 -- description:
 homepage:            https://github.com/Izzimach/zorja#readme
 license:             BSD3
