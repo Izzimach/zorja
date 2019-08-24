@@ -1,15 +1,22 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Zorja.ZHOAS where
 
-import Data.Kind (Constraint)
+import Data.Kind
 
 import Zorja.Patchable
+
+import Data.Distributive
+import Control.Comonad
 
 
 --
@@ -67,51 +74,120 @@ data ZDExpr a where
     ZDF :: (Patchable a, Patchable b) => (ZDExpr a -> ZDExpr b) -> ZDExpr (a -> b)
     ZDV :: (Patchable a) => a -> PatchDelta a -> ZDExpr a
 
-zdEval :: (Patchable a) => ZDExpr a -> (a, PatchDelta a)
-zdEval (ZDF zf)   = let f  = \a ->        zdValue $ zf (ZDV a mempty)
-                        df = \a -> \da -> zdPatch $ zf (ZDV a da)
-                    in
-                        (f, df)
-zdEval (ZDV a da) = (a, da)
-
-instance (Patchable a, Show a, Show (PatchDelta a)) => Show (ZDExpr a) where
-    show (ZDF zf) = "(ZDExpr Function)"
-    show (ZDV a da) = "(ZDExpr Value: " ++ show a ++ "," ++ show da ++ ")"
-
---
--- Functor type for ZDExprs. For this to work both a and da must be
--- functors.
---
-class ZDFunctor (zf :: * -> *) where
-    zdmap :: ZDExpr (a -> b) -> ZDExpr (zf a) -> ZDExpr (zf b)
-
-class ZDStructFunctor (zf :: * -> *) where
-    zdstructuremap :: (StructurePatchable a, StructurePatchable b) =>
-             ZDExpr (a -> b) -> ZDExpr (zf a) -> ZDExpr (zf b)
-
---
--- Distributive typeclass over ZDExpr. Needed for catamorphism and friends
---
-class ZDDistributive (zf :: * -> *) where
-    zddist :: (StructurePatchable a) => ZDExpr (zf a) -> zf (ZDExpr a)
-
 zdValue :: (Patchable a) => ZDExpr a -> a
 zdValue zv = fst $ zdEval zv
 
 zdPatch :: (Patchable a) => ZDExpr a -> PatchDelta a
 zdPatch zv = snd $ zdEval zv
 
-zdCompose :: (Patchable a, Patchable b, Patchable c) =>
-  ZDExpr (b -> c) -> ZDExpr (a -> b) -> ZDExpr (a -> c)
-zdCompose zbc zab = lam $ (app zbc) . (app zab)
+zdApplyPatch :: (Patchable a) => ZDExpr a -> a
+zdApplyPatch zv = let (x,dx) = zdEval zv
+                  in patch x dx
+
+
+zdEval :: forall a. (Patchable a) => ZDExpr a -> (a, PatchDelta a)
+zdEval (ZDF zf)   = (f,df)
+    where f = \a -> zdValue $ zf (ZDV a mempty)
+          df = \a -> \da -> zdPatch $ zf (ZDV a da)
+zdEval (ZDV a da) = (a, da)
 
 instance ZHOAS ZDExpr where
     type ZOk ZDExpr a = Patchable a
     lam zf = ZDF zf
     app (ZDF zf) a = zf a
     app (ZDV f df) val = let (a,da) = zdEval val
-                         in
-                             ZDV (f a) (df a da)
+                         in  ZDV (f a) (df a da)
+    
+instance (Patchable a, Show a, Show (PatchDelta a)) => Show (ZDExpr a) where
+    show (ZDF zf) = "(ZDExpr Function)"
+    show (ZDV a da) = "(ZDExpr Value: " ++ show a ++ "," ++ show da ++ ")"
+
+-- distribution for ZDExpr of SelfDelta and FunctorDelta data
+
+data SelfDeltaExpr a = SDE a a
+instance Functor SelfDeltaExpr where
+    fmap f (SDE a0 a1) = SDE (f a0) (f a1)
+
+{-
+data FunctorDeltaExpr a da = FDE a da (Iso' da a) deriving (Eq, Show)
+
+instance (Functor f) => Functor (FunctorDeltaExpr f) where
+    fmap f (FDE a fa) = FDE (f a) (fmap f fa)
+
+instance (Applicative f) => Applicative (FunctorDeltaExpr f) where
+    pure x = FDE x (pure x)
+    (FDE f df) <*> (FDE a da) = FDE (f a) (df <*> da)
+
+
+instance (Foldable f) => Foldable (FunctorDeltaExpr f) where
+    foldMap f (FDE a fa) = (f a) <> (foldMap f fa)
+
+instance (Traversable f) => Traversable (FunctorDeltaExpr f) where
+    traverse f (FDE a fa) = FDE <$> (f a) <*> (traverse f fa)
+
+instance (Distributive f) => Distributive (FunctorDeltaExpr f) where
+    distribute fga = FDE (fmap gval fga) (collect gchange fga)
+        where
+            gval (FDE a _) = a
+            gchange (FDE _ fa) = fa
+
+instance (Functor f) => Comonad (FunctorDeltaExpr f) where
+    extract (FDE a fa) = a
+    duplicate x@(FDE a fa) = FDE x (fmap (const x) fa)
+    extend f x@(FDE a fa) = FDE (f x) (fmap (const (f x)) fa)
+-}
+
+--
+-- | A property of some data structures is that they
+-- can represent adding or removing an element as a ZDExpr,
+-- so they can be embedded into a structural changing data structure.
+-- This allows us to use @Functor@ and @Foldable@ with data structures
+-- that add and remove elements.
+--
+data SDExpr a where
+    SDF :: (SDExpr a -> SDExpr b) -> SDExpr (a -> b)
+    SDV :: a -> PatchDelta a -> SDExpr a
+    SDAdd :: a -> SDExpr a
+    SDDelete :: a -> SDExpr a
+
+class (Patchable a) => StructurePatchable a where
+    fromSDExpr :: SDExpr a -> ZDExpr a
+    toSDExpr :: ZDExpr a -> SDExpr a
+
+instance ZHOAS SDExpr where
+    type ZOk SDExpr a = StructurePatchable a
+    lam sf = SDF sf
+    app (SDF sf) x = sf x
+    app (SDV f df) x = let (a,da) = zdEval $ fromSDExpr x
+                       in  SDV (f a) (df a da)
+    app (SDAdd f) x = undefined {-let (a,_) = zdEval $ fromSDExpr x
+                      in SDAdd (f a)-}
+    app (SDDelete f) x = undefined {-let (a,_) = zdEval $ fromSDExpr x
+                         in SDDelete (f a)-}
+
+{-
+-- | Functions as SDExprs
+instance (Patchable (a -> b), StructurePatchable a, StructurePatchable b) => StructurePatchable (a -> b) where
+    fromSDExpr (SDF sf)     = ZDF (fromSDExpr . sf . toSDExpr)
+    fromSDExpr (SDV a da)   = ZDV a da
+    -- figure out what these mean more rigorously before implementing them!
+    fromSDExpr (SDAdd f)    = undefined {-ZDF $ \zx -> let (x,dx) = zdEval zx
+                                           in fromSDExpr (SDAdd (f x))-}
+    fromSDExpr (SDDelete f) = undefined {-ZDF $ \zx -> let (x,dx) = zdEval zx
+                                           in fromSDExpr (SDDelete (f x))-}
+
+    toSDExpr (ZDF zf) = SDF (toSDExpr . zf . fromSDExpr)
+    toSDExpr (ZDV a da) = SDV a da
+-}
+
+--
+-- Distributive typeclass over ZDExpr. Needed for catamorphism and friends
+--
+
+
+zdCompose :: (Patchable a, Patchable b, Patchable c) =>
+  ZDExpr (b -> c) -> ZDExpr (a -> b) -> ZDExpr (a -> c)
+zdCompose zbc zab = lam $ (app zbc) . (app zab)
 
 zLiftFunction :: (Patchable a, Patchable b) => (a -> b) -> ZDExpr (a -> b)
 zLiftFunction f = ZDV f df
@@ -122,20 +198,6 @@ zLiftFunction f = ZDV f df
                               changes b b'
 
 
---
--- A property of some data structures is that they
--- can represent adding or removing an element as a ZDExpr,
--- so they can be embedded into a structural changing data structure.
---
-data SDExpr a =
-      SDJust (ZDExpr a)
-    | SDAdd a
-    | SDDelete a
-
-class (Patchable a) => StructurePatchable a where
-    fromSDExpr :: SDExpr a -> ZDExpr a
-    toSDExpr :: ZDExpr a -> SDExpr a
- 
 --
 -- Bool and if for ZDExpr
 --
