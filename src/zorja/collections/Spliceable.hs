@@ -118,4 +118,30 @@ type instance PatchDelta (V.Vector a) = SpliceList (V.Vector a)
 
 instance (Eq a) => Patchable (V.Vector a) where
     patch a da = foldl spliceInChunk a da
-    changes a a' = [SPLS 0 (chunkSize a) a']
+    changes a a' = [SPLS 0 (chunkSize a) a'] -- not effiecient but technically correct
+
+
+--
+-- | Code to fold a tree into a SpliceArray, with deltas
+-- So changes to the tree are transformed into splice actions on the folded
+-- result.
+--
+{-
+treeToSplice :: (SpliceArray a, Monoid a) => RoseTree a -> RoseTreeDelta a -> ZDExpr a
+treeToSplice t dt =
+    let txt = foldTree t
+        tsize = chunkSize txt
+    in case (unfix dt) of
+        NoChange -> SPLJ txt []
+        Replace b ->  let btxt = foldTree b
+                          splice = mkSplice 0 (toInteger tsize) btxt
+                      in SPLJ txt [splice]
+        LeafChange da -> SPLJ txt (deltaToSplice da)
+        BranchChange dl dr -> case (unfix t) of
+            (Leaf x) -> undefined
+            (Branch l r) ->
+                let lxd = treeToSplice l dl
+                    rxd = treeToSplice r dr
+                in concatSpliceDExpr lxd rxd
+-}
+
