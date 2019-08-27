@@ -14,18 +14,12 @@
 
 module Zorja.Collections.Cofree where
     
-import Data.Functor.Identity
 import Data.Functor.Foldable
 import Data.Semigroup
 import Data.Distributive
-import Data.Kind
-import qualified Data.Text as T
+import Data.Kind (Type, Constraint)
 
-import Control.Comonad
 import Control.Applicative
-import Control.Comonad.Cofree
-import Control.Comonad.Trans.Cofree (CofreeF)
-import qualified Control.Comonad.Trans.Cofree as CCTC
 
 import Zorja.Patchable
 import Zorja.ZHOAS
@@ -68,7 +62,7 @@ instance FDECompatible ReplaceOnly where
 
 -- algebra for mappending FunctorDExpr's
 -- 'cata mappendFDE' is basically foldMap for FunctorDExpr
-mappendFDE :: (Monoid (FunctorDExpr f a), Functor f) => 
+mappendFDE :: (Monoid (FunctorDExpr f a)) => 
     ListXF (FunctorDExpr f a) (FunctorDExpr f a) -> (FunctorDExpr f a)
 mappendFDE NilX = mempty
 mappendFDE (ConsX a b) = a <> b
@@ -107,7 +101,7 @@ instance (Functor f) => Functor (ListX f) where
 
 instance Functor (ListXF a) where
     fmap f (ConsX a b) = ConsX a (f b)
-    fmap f NilX        = NilX
+    fmap _f NilX        = NilX
 
 type instance Base (ListX f a) = ListXF (f a)
 
@@ -259,7 +253,7 @@ instance (Monoid (fa a),
         => Monoid (CofDD fb fa a) where
     mempty = mempty :<# mempty
 
-instance (FDECompatible fa, FDECompatible fb, Applicative fb) => FDECompatible (CofD fb fa) where
+instance (FDECompatible fa, FDECompatible fb) => FDECompatible (CofD fb fa) where
     type FDEConstraint (CofD fb fa) a = 
         (Patchable (fa a),
          Patchable (fb (CofD fb fa a)),
@@ -294,11 +288,6 @@ instance (FDECompatible fa,
           FunctorDelta fb (CofD fb fa a) ~ PatchDelta (fb (CofD fb fa a)),
           Patchable (fa a),
           Patchable (fb (CofD fb fa a)),
-          Monoid (FunctorDelta fa a),
-          Applicative fb,
-          Monoid (fb (CofD fb fa a)),
-          Monoid (fb (CofD fb (FunctorDelta fa) a)),
-          Monoid     (CofD fb (FunctorDelta fa) a),
           Monoid (CofDD fb fa a)) =>
               Patchable (CofD fb fa a) where
     patch (a :<< as) (da :<# das) =
@@ -311,8 +300,7 @@ instance (FDECompatible fa,
 
 
 combineCofreeFDE ::
-    (Applicative (fb (x :: * -> *)),
-     FDETraversable (fb x)) =>
+    (FDETraversable (fb x)) =>
         FunctorDExpr (CofD (fb x) fa) a -> 
         CofDF (fb x) (FunctorDExpr fa) a (FunctorDExpr (CofD (fb x) fa) a)
 combineCofreeFDE (FDE (a :<< as) (da :<# das)) =
@@ -328,13 +316,15 @@ testTree = (ReplaceOnly 3)
                       ReplaceOnly $ (ReplaceOnly (Sum 5)) :<< ListX []]
 
 testTreeD :: PatchDelta (CofD (ListX ReplaceOnly) ReplaceOnly (Sum Int))
-testTreeD = let nochange =  Replacing $ Option $ Nothing
-                leaf x   = Replacing $ Option $ Just $ Last $ (ReplaceOnly x) :<< ListX []
+testTreeD = let nochange  = Replacing $ Option $ Nothing
+                leaf x    = Replacing $ Option $ Just $ Last $ (ReplaceOnly x) :<< ListX []
+                emptyleaf = Replacing $ Option $ Nothing
             in
-                nochange :<# ListX [leaf (Sum 3),
-                                    Replacing $ Option $ Nothing] --leaf (Replacing $ Option $ Just $ Last 6),
-                                    --leaf nochange]
+                nochange :<# ListX [leaf (Sum 9),
+                                    emptyleaf]
 
+testTreeFDE :: FunctorDExpr (CofD (ListX ReplaceOnly) ReplaceOnly) (Sum Int)
 testTreeFDE = FDE testTree testTreeD
 
+testTreeZD :: ZDExpr (CofD (ListX ReplaceOnly) ReplaceOnly (Sum Int))
 testTreeZD = fromFDE testTreeFDE
