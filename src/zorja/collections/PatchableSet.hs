@@ -46,7 +46,8 @@ instance Foldable PatchableSet where
     foldMap fm (PatchableSet a) = foldMap fm a
 
 --
--- inserts and deletes should be disjoint
+-- A set that describes inserts and deletes in no particular
+-- order. Inserts and deletes should be disjoint
 --
 
 data UpDownSet a = UpDownSet {

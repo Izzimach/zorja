@@ -1,0 +1,257 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE QuantifiedConstraints #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
+
+module Zorja.Collections.Cofree where
+    
+import Data.Functor.Identity
+import Data.Functor.Foldable
+import Data.Semigroup
+import Data.Distributive
+import Data.Kind
+import qualified Data.Text as T
+
+import Data.Profunctor.Types
+import Data.Profunctor.Mapping
+import Data.Profunctor.Traversing
+
+import Control.Comonad
+import Control.Comonad.Cofree
+import Control.Lens.Lens
+import Control.Lens.Type
+import Control.Lens.Setter
+import Control.Lens.Iso
+
+import Zorja.Patchable
+import Zorja.ZHOAS
+
+data LensDeltaExpr a da = IDE a da
+
+class LensDeltaIso a where
+    type Modifier a :: Type
+    deltamap :: Modifier a -> LensDeltaExpr a (PatchDelta a) -> LensDeltaExpr a (PatchDelta a)
+    
+instance LensDeltaIso (ReplaceOnly a) where
+    type Modifier (ReplaceOnly a) = CofreeMapping (->) a a
+    deltamap f (IDE a da) =
+--        let unreplace = \(ReplaceOnly x) -> x
+--            cof = CofreeMapping $ \x -> (fmap (unreplace . f . ReplaceOnly) x)
+--        in
+            IDE (runCofreeMapping f a) (runCofreeMapping f da)
+    
+instance LensDeltaIso (ListX a) where
+    type Modifier (ListX a) = FreeMapping (->) (ListX a) (ListX a)
+    deltamap f (IDE la lda) = _x f la
+
+newtype ListX a = ListX [a]
+    deriving (Eq, Show)
+
+instance Functor (ListX) where
+    fmap f (ListX as) = ListX (fmap f as)
+
+instance Applicative ListX where
+    (ListX a) <*> (ListX b) = ListX (a <*> b)
+
+instance Foldable (ListX) where
+    foldMap f (ListX as) = foldMap f as
+
+idiso :: Traversal' (Identity a) a
+idiso p = dimap runIdentity (fmap Identity) p
+
+mkListXiso :: (Patchable a) => ListX a -> (ListX (PatchDelta a)) -> LensDeltaExpr (ListX a) (PatchDelta (ListX a))
+mkListXiso l dl = IDE l dl 
+
+mkIdentityExpr :: a -> Identity a -> LensDeltaExpr a (Identity a)
+mkIdentityExpr a da = IDE a da
+
+
+ecks :: FreeMapping (->) Int [Int]
+ecks = FreeMapping runIdentity (\x -> [x,x]) Identity
+
+    
+convertListXLens :: Traversal' (PatchDelta a) a -> Traversal' (ListX (PatchDelta a)) (ListX a)
+-- l :: p a (f a) -> p (PatchDelta a)) (f (PatchDelta a))
+-- result :: p (ListX a) (f (ListX a)) -> p (ListX (PatchDelta a)) (f (ListX (PatchDelta a)))
+convertListXLens l p = \l2 -> let toListX = \x -> ListX [x]
+                                  fromListX = \(ListX a) -> head a
+                                  l3 = l $ (fmap fromListX) . p . toListX
+                              in
+                                  traverse l3 l2
+
+
+instance Traversable (ListX) where
+    traverse f (ListX as) = ListX <$> (traverse f as)
+
+
+type instance (PatchDelta (ListX a)) = (ListX (PatchDelta a))
+
+testList :: ListX (ReplaceOnly Int)
+testList = ListX [ReplaceOnly 3, ReplaceOnly 5]
+
+testListD :: PatchDelta (ListX (ReplaceOnly Int))
+--testListD :: ListXD Replacing (ListX ReplaceOnly Int)
+testListD = ListX $ [Replacing (Option Nothing), 
+                     Replacing (Option (Just (Last (3::Int) )))]
+
+--testFDE :: FunctorDeltaExpr FFWrap (ListX (ReplaceOnly Int))
+--testFDE = FDE testList testListD
+
+
+{-
+--
+-- h is one of: Identity, HKDDelta, or SDExpr
+
+data SCofree h f a = (HKD h a) :< (HKD h (f (SCofree h f a)))
+data SCofreeF h f a x = (HKD h a) :<< (HKD h (f (HKD h x)))
+
+type instance PatchDelta (SCofree Identity f a) = SCofree HKDDelta f a
+type instance PatchDelta (SCofreeF Identity f a x) = SCofreeF HKDDelta f a (PatchDelta x)
+
+projectSCofree :: (StructurePatchable (SCofree Identity f a)) 
+    => SDExpr (SCofree Identity f a) 
+    -> SDExpr (SCofreeF Identity f a (SCofree Identity f a))
+projectSCofree sv =
+    let (v,dv) = zdEval $ fromSDExpr sv
+        (a :< xs) = v
+        (da :< dxs) = dv
+    in SDV (a :<< xs) (da :<< dxs)
+
+distributeSCofree :: (StructurePatchable x,
+                      StructurePatchable (SCofreeF Identity f a x))
+    => SDExpr (SCofreeF Identity f a x)
+    -> SCofreeF Identity f (SDExpr a) (SDExpr x)
+distributeSCofree sv =
+    let (v,dv) = zdEval $ fromSDExpr sv
+        (a :<< xs) = v
+        (da :<< dxs) = dv
+    in (SDV a da) :<< (_f xs dxs)
+
+instance (Semigroup (HKD h a), Semigroup (HKD h (f (SCofree h f a)))) => Semigroup (SCofree h f a) where
+    (a :< as) <> (b :< bs) = (a <> b) :< (as <> bs)
+
+instance (Monoid (HKD h a), Monoid (HKD h (f (SCofree h f a)))) => Monoid (SCofree h f a) where
+    mempty = mempty :< mempty
+-}
+      
+{-
+data SCofree f a = a :< (f (SCofree f a))
+data SCofreeD f a = (PatchDelta a) :<< (PatchDelta (f (SCofree f a)))
+data SCofreeF f a x = a :<= (f x)
+data SCofreeDF f a x = (PatchDelta a) :<== (PatchDelta (f x))
+
+type instance PatchDelta (SCofree f a) = SCofreeD f a
+type instance PatchDelta (SCofreeF f a x) = SCofreeDF f a x
+
+--
+-- semigroup and monoid instances
+--
+
+instance (Semigroup a, Semigroup (f (SCofree f a))) => Semigroup (SCofree f a) where
+    (a :< as) <> (b :< bs) = (a <> b) :< (as <> bs)
+
+instance (Semigroup (PatchDelta a), Semigroup (PatchDelta (f (SCofree f a)))) 
+         => Semigroup (SCofreeD f a) where
+    (a :<< as) <> (b :<< bs) = (a <> b) :<< (as <> bs)
+    
+instance (Semigroup (f x), Semigroup a) => Semigroup (SCofreeF f a x) where
+    (a :<= as) <> (b :<= bs) = (a <> b) :<= (as <> bs)
+    
+instance (Semigroup (PatchDelta (f x)), Semigroup (PatchDelta a)) => Semigroup (SCofreeDF f a x) where
+    (a :<== as) <> (b :<== bs) = (a <> b) :<== (as <> bs)
+        
+instance (Monoid a, Monoid (f (SCofree f a))) => Monoid (SCofree f a) where
+    mempty = mempty :< mempty
+
+instance (Monoid (PatchDelta a), Monoid (PatchDelta (f (SCofree f a)))) => Monoid (SCofreeD f a) where
+    mempty = mempty :<< mempty
+    
+instance (Monoid (f x), Monoid a) => Monoid (SCofreeF f a x) where
+    mempty = mempty :<= mempty
+        
+instance (Monoid (PatchDelta (f x)), Monoid (PatchDelta a)) => Monoid (SCofreeDF f a x) where
+    mempty = mempty :<== mempty
+                
+sdCofreeProject :: (Patchable a,
+                    Patchable (SCofree f a),
+                    Patchable (SCofreeF f a (SCofree f a)))
+    => ZDExpr (SCofree f a) -> ZDExpr (SCofreeF f a (SCofree f a))
+sdCofreeProject = \zt ->
+  let (z, dz) = zdEval zt
+      (a :< xs) = z
+      (da :<< dxs) = dz
+  in
+      ZDV (a :<= xs) (da :<== dxs)
+
+scofreedistribute :: (SDDistributive f, StructurePatchable x) 
+        => SDExpr (SCofreeF f a x) -> SCofreeF f (SDExpr a) (SDExpr x)
+scofreedistribute (SDV v dv) =
+    let (a :<= xs) = v
+        (da :<== dxs) = dv
+        a' = SDV a da
+        xs' = sddistribute (SDV xs dxs)
+    in a' :<= xs'
+scofreedistribute (SDAdd (a :<= xs)) = undefined
+scofreedistribute (SDDelete (a :<= xs)) = undefined
+
+scofreesequence :: (SDTraversable f, StructurePatchable x) 
+      => SCofreeF f (SDExpr a) (SDExpr x) -> SDExpr (SCofreeF f a x) 
+scofreesequence (v :<= vs) =
+    let (SDV a da) = v
+        (SDV xs dxs) = sdsequenceA vs
+    in
+        SDV (a :<= xs) (da :<== dxs)
+
+
+instance (Patchable a, Patchable (f a),
+          Monoid (PatchDelta (f (SCofree f a)))) => Patchable (SCofree f a) where
+    patch c dc = undefined
+    changes c dc = undefined
+
+instance (StructurePatchable a, Patchable (f a),
+          Monoid (PatchDelta (f (SCofree f a)))) => StructurePatchable (SCofree f a) where
+    fromSDExpr = undefined
+    toSDExpr = undefined
+
+instance (SDFunctor f, Patchable a, Patchable x,
+          Monoid (PatchDelta a), Monoid (PatchDelta (f x)))
+      => Patchable (SCofreeF f a x) where
+    patch c dc = undefined
+    changes c c' = undefined
+
+type instance PatchDelta (CCC.Cofree f a) = CCC.Cofree (FunctorDelta f) (PatchDelta a)
+type instance PatchDelta (CCTC.CofreeF f a x) = CCTC.CofreeF (FunctorDelta f) (PatchDelta a) (PatchDelta x)
+
+projectSDCofree :: (StructurePatchable (CCC.Cofree f a))
+    => SDExpr (CCC.Cofree f a) -> SDExpr (CCTC.CofreeF f a (CCC.Cofree f a))
+projectSDCofree sv =
+    let (v,dv) = zdEval $ fromSDExpr sv
+        (a CCC.:< xs) = v
+        (da CCC.:< dxs) = dv
+        fx = \a da -> a CCTC.:< da
+    in SDV (a CCTC.:< xs) (da CCTC.:< dxs)
+        
+
+zipSDCofreeF :: (SDDistributive f,
+                Patchable a,
+                StructurePatchable x,
+                StructurePatchable (CCTC.CofreeF f a x),
+                (FunctorDelta f x) ~ (PatchDelta (f x))
+               ) 
+    => SDExpr (CCTC.CofreeF f a x) -> CCTC.CofreeF f (ZDExpr a) (SDExpr x)
+zipSDCofreeF sv =
+    let (v,dv) = zdEval $ fromSDExpr sv
+        (a CCTC.:< xs) = v
+        (da CCTC.:< dxs) = _f dv
+        a' = ZDV a da
+        xs' = sddistribute (SDV xs dxs)
+    in a' CCTC.:< xs'
+-}

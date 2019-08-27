@@ -31,7 +31,6 @@ module Zorja.Patchable (
 import GHC.Generics
 
 import Data.Kind
-import Data.Functor.Identity
 import Data.Semigroup
 import Data.Group
 

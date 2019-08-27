@@ -44,6 +44,9 @@ fdeApplyPatch v = zdApplyPatch $ fromFDE v
 class FDEDistributive (fd :: (* -> *) -> * -> *) where
     distributeFDE :: FunctorDExpr (fd fx) x -> fd (FunctorDExpr fx) x
 
+class FDETraversable (fd :: Type -> Type) where
+    traverseFDE :: FunctorDExpr fd (fx x) -> fd (FunctorDExpr fx x)
+
 instance (Semigroup a) => Semigroup (FunctorDExpr ReplaceOnly a) where
     (FDE (ReplaceOnly a) (Replacing da)) <> (FDE (ReplaceOnly b) (Replacing db)) =
         let c = case (getOption da, getOption db) of
@@ -159,7 +162,11 @@ instance FDEDistributive ListX where
     distributeFDE :: FunctorDExpr (ListX f) a -> ListX (FunctorDExpr f) a
     distributeFDE (FDE (ListX as) (ListX das)) = ListX $ zipWith FDE as das
 
-instance (FDECompatible f, FDEConstraint f a, Patchable (f a), Monoid (FunctorDelta f a)) 
+instance (FDETraversable f) => FDETraversable (ListX f) where
+    traverseFDE :: FunctorDExpr (ListX f) (g a) -> ListX f (FunctorDExpr g a)
+    traverseFDE (FDE (ListX as) (ListX das)) = ListX $ fmap traverseFDE $ zipWith FDE as das
+
+instance (FDECompatible f, FDEConstraint f a, Patchable (f a)) 
     => Patchable (ListX f a) where
     patch (ListX a) (ListX da) = ListX $ zipWith fpatch a da
         where
@@ -169,7 +176,7 @@ instance (FDECompatible f, FDEConstraint f a, Patchable (f a), Monoid (FunctorDe
         where
             fchanges v v' = let dv = changes v v'
                                 -- convert from PatchDelta to FunctorDelta
-                                (FDE fa dfa) = toFDE (ZDV v dv)
+                                (FDE _da dfa) = toFDE (ZDV v dv)
                             in dfa
 
 testList :: ListX ReplaceOnly (Sum Int)
@@ -188,6 +195,7 @@ testListFDE = FDE testList testListD
 -- - starting with a FunctorDExpr (ListX ReplaceOnly) (Sum Int)
 -- - unfold into a ListX with coalListXFDE
 -- - then fold up with mergeListXFDE
+testListHylo :: FunctorDExpr ReplaceOnly (Sum Int)
 testListHylo = hylo mergeListXFDE coalgListXFDE testListFDE
 
 --
@@ -196,16 +204,26 @@ testListHylo = hylo mergeListXFDE coalgListXFDE testListFDE
 
 data CofD fb fa a = (fa a) :<< (fb (CofD fb fa a))
 
-instance (Show (fa a), Show (fb (CofD fb fa a))) => Show (CofD fb fa a) where
-    show (x :<< xs) = "(" ++ show x ++ " :<< " ++ show xs ++ ")"
+data CofDD fb fa a = (FunctorDelta fa a) :<# (FunctorDelta fb (CofD fb fa a))
 
-type instance PatchDelta (CofD fb fa a) = CofD fb (FunctorDelta fa) a
-type instance FunctorDelta (CofD fb fa) = CofD fb (FunctorDelta fa)
+instance (Eq a, Eq (fa a), forall x. Eq x => Eq (fb x)) => Eq (CofD fb fa a) where
+    (a :<< as) == (b :<< bs)  =  (a == b) && (as == bs)
+
+instance (Show (fa a), Show (fb (CofD fb fa a))) => Show (CofD fb fa a) where
+    show (x :<< xs) = "(CofD " ++ show x ++ " :<< " ++ show xs ++ ")"
+    
+instance (Show (FunctorDelta fa a), Show (FunctorDelta fb (CofD fb fa a))) => Show (CofDD fb fa a) where
+    show (x :<# xs) = "(CofDD " ++ show x ++ " :<< " ++ show xs ++ ")"
+        
+type instance PatchDelta (CofD fb fa a) = CofDD fb fa a --CofD fb (FunctorDelta fa) a
+type instance FunctorDelta (CofD fb fa) = CofDD fb fa --CofD fb (FunctorDelta fa)
 
 data CofDF fb fa a x = (fa a) :<= (fb x)
 
-type instance PatchDelta (CofDF fb fa a x) = CofDF fb (FunctorDelta fa) a x
-type instance FunctorDelta (CofDF fb fa a) = CofDF fb (FunctorDelta fa) a
+data CofDDF fb fa a x = (FunctorDelta fa a) :<=# (FunctorDelta fb x)
+
+type instance PatchDelta (CofDF fb fa a x) = CofDDF fb fa a x--CofDF fb (FunctorDelta fa) a x
+type instance FunctorDelta (CofDF fb fa a) = CofDDF fb fa a--CofDF fb (FunctorDelta fa) a
 
 type instance Base (CofD fb fa a) = CofDF fb fa a
 
@@ -226,14 +244,32 @@ instance (Semigroup (fa a), Applicative fb) => Semigroup (CofD fb fa a) where
 instance (Monoid (fa a), Monoid (fb (CofD fb fa a)), Applicative fb) => Monoid (CofD fb fa a) where
     mempty = mempty :<< mempty
 
+instance (Semigroup (fa a),
+          Semigroup (FunctorDelta fa a),
+          Applicative fb,
+          Applicative (FunctorDelta fb)) 
+        => Semigroup (CofDD fb fa a) where
+    (a :<# as) <> (b :<# bs) = (a <> b) :<# (liftA2 (<>) as bs)
 
-instance (FDECompatible fa, Applicative fb) => FDECompatible (CofD fb fa) where
+instance (Monoid (fa a),
+          Monoid (FunctorDelta fa a),
+          Applicative fb,
+          Applicative (FunctorDelta fb),
+          Monoid (FunctorDelta fb (CofD fb fa a)))
+        => Monoid (CofDD fb fa a) where
+    mempty = mempty :<# mempty
+
+instance (FDECompatible fa, FDECompatible fb, Applicative fb) => FDECompatible (CofD fb fa) where
     type FDEConstraint (CofD fb fa) a = 
         (Patchable (fa a),
+         Patchable (fb (CofD fb fa a)),
          Monoid (fb (CofD fb fa a)),
+         Monoid (CofDD fb fa a),
          Monoid (fb (CofD fb (FunctorDelta fa) a)),
          Monoid (FunctorDelta fa a), 
-         FDEConstraint fa a, 
+         FDEConstraint fa a,
+         FDEConstraint fb (CofD fb fa a),
+         FunctorDelta fb (CofD fb fa a) ~ PatchDelta (fb (CofD fb fa a)),
          FunctorDelta fa a ~ PatchDelta (fa a))
     --toFDE :: ZDExpr (CofD fb fa a) -> FunctorDExpr (CofD fb fa) a
     toFDE z = let (v,dv) = zdEval z
@@ -242,52 +278,62 @@ instance (FDECompatible fa, Applicative fb) => FDECompatible (CofD fb fa) where
     fromFDE (FDE a da) = ZDV a da
 
 
-instance (Applicative fb) => FDEDistributive (CofD fb) where
+instance (Functor fb, FDETraversable fb) => FDEDistributive (CofD fb) where 
     distributeFDE :: FunctorDExpr (CofD fb fa) a -> CofD fb (FunctorDExpr fa) a
-    distributeFDE (FDE (a :<< as) (da :<< das)) =
-        (FDE a da) :<< fmap distributeFDE (FDE <$> as <*> das)
+    distributeFDE (FDE x dx) =
+        let (a  :<< as)  = x
+            (da :<# das) = dx
+        in
+            (FDE a da) :<< (fmap distributeFDE (traverseFDE (FDE as das)))
 
 instance (FDECompatible fa,
+          FDECompatible fb,
           FDEConstraint fa a,
+          FDEConstraint fb (CofD fb fa a),
           FunctorDelta fa a ~ PatchDelta (fa a),
+          FunctorDelta fb (CofD fb fa a) ~ PatchDelta (fb (CofD fb fa a)),
           Patchable (fa a),
+          Patchable (fb (CofD fb fa a)),
           Monoid (FunctorDelta fa a),
           Applicative fb,
           Monoid (fb (CofD fb fa a)),
           Monoid (fb (CofD fb (FunctorDelta fa) a)),
-          Monoid     (CofD fb (FunctorDelta fa) a)) =>
+          Monoid     (CofD fb (FunctorDelta fa) a),
+          Monoid (CofDD fb fa a)) =>
               Patchable (CofD fb fa a) where
-    patch (a :<< as) (da :<< das) =
+    patch (a :<< as) (da :<# das) =
         let b  = (fdeApplyPatch (FDE a da)) 
-            bs = (fmap fdeApplyPatch (FDE <$> as <*> das))
+            bs = (fdeApplyPatch (FDE as das))
         in
             b :<< bs
 
-    changes (a :<< as) (a' :<< as') = (changes a a') :<< liftA2 changes as as'
+    changes (a :<< as) (a' :<< as') = (changes a a') :<# (changes as as')
 
 
 combineCofreeFDE ::
-    (Applicative (fb (x :: * -> *))) =>
+    (Applicative (fb (x :: * -> *)),
+     FDETraversable (fb x)) =>
         FunctorDExpr (CofD (fb x) fa) a -> 
         CofDF (fb x) (FunctorDExpr fa) a (FunctorDExpr (CofD (fb x) fa) a)
-combineCofreeFDE (FDE (a :<< as) (da :<< das)) =
-    (FDE a da) :<= (FDE <$> as <*> das)
+combineCofreeFDE (FDE (a :<< as) (da :<# das)) =
+    (FDE a da) :<= (traverseFDE (FDE as das))
 
 
 --foldCofreeFDE ::    
                         
-testTree :: CofD (ListX ReplaceOnly) ReplaceOnly Int
+testTree :: CofD (ListX ReplaceOnly) ReplaceOnly (Sum Int)
 testTree = (ReplaceOnly 3)
                :<<
-               ListX [ReplaceOnly $ (ReplaceOnly 4) :<< ListX [], 
-                      ReplaceOnly $ (ReplaceOnly 5) :<< ListX []]
+               ListX [ReplaceOnly $ (ReplaceOnly (Sum 4)) :<< ListX [], 
+                      ReplaceOnly $ (ReplaceOnly (Sum 5)) :<< ListX []]
 
-testTreeD :: PatchDelta (CofD (ListX ReplaceOnly) ReplaceOnly Int)
-testTreeD = let ugh =  Replacing $ Option $ Nothing
-                leaf x = ReplaceOnly $ x :<< ListX []
+testTreeD :: PatchDelta (CofD (ListX ReplaceOnly) ReplaceOnly (Sum Int))
+testTreeD = let nochange =  Replacing $ Option $ Nothing
+                leaf x   = Replacing $ Option $ Just $ Last $ (ReplaceOnly x) :<< ListX []
             in
-                ugh :<< ListX [ReplaceOnly $ (Replacing $ Option $ Just $ Last 6) :<< ListX [],
-                               leaf ugh]
+                nochange :<# ListX [leaf (Sum 3),
+                                    Replacing $ Option $ Nothing] --leaf (Replacing $ Option $ Just $ Last 6),
+                                    --leaf nochange]
 
 testTreeFDE = FDE testTree testTreeD
 
