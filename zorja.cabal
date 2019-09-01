@@ -1,29 +1,22 @@
+cabal-version:       2.2
 name:                zorja
 version:             0.1.0.0
 synopsis:            Incremental Lambda Calculus, including Cofree Comonads
 -- description:
 homepage:            https://github.com/Izzimach/zorja#readme
-license:             BSD3
+license:             BSD-3-Clause
 license-file:        LICENSE
 author:              Gary Haussmann
 maintainer:          gjhaussmann@gmail.com
 copyright:           Copyright (c) 2018 Gary Haussmann
 category:            Web
 build-type:          Simple
-cabal-version:       >=1.10
 extra-source-files:  README.md
 
-library
-  hs-source-dirs:      src
-  --main-is:             Main.hs
+common deps
   ghc-options:         -Wall -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
   default-language:    Haskell2010
-  exposed-modules:     Zorja.Patchable,
-                       Zorja.Primitives,
-                       Zorja.ZHOAS,
-                       Zorja.FunctorDExpr,
-                       Zorja.Collections.ZJIntMap,
-                       Zorja.Collections.Cofree
+  hs-source-dirs:      src
   build-depends:       base >= 4.7 && < 5,
                        constraints,
                        containers,
@@ -40,25 +33,34 @@ library
                        groups,
                        edit-distance-vector
 
+
+common test-deps
+  build-depends:        hedgehog
+
+library
+  import: deps
+  --main-is:             Main.hs
+  exposed-modules:     Zorja.Patchable,
+                       Zorja.Primitives,
+                       Zorja.ZHOAS,
+                       Zorja.FunctorDExpr,
+                       Zorja.Collections.ListX,
+                       Zorja.Collections.ZJIntMap,
+                       Zorja.Collections.Cofree
+
 test-suite zorja-test
+  import: deps, test-deps
   type:                exitcode-stdio-1.0
   main-is:             TestMain.hs
-  hs-source-dirs:      test, src
-  ghc-options:         -Wall -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
-  default-language:    Haskell2010
-  other-modules:       Zorja.Patchable, 
+  hs-source-dirs:      test
+  build-depends:       zorja
+  other-modules:       Zorja.Patchable,
                        Zorja.Primitives,
-                       Zorja.ZHOAS, 
+                       Zorja.ZHOAS,
                        Zorja.FunctorDExpr,
+                       Zorja.Collections.ListX,
+                       Zorja.Collections.ZJIntMap,
+                       Zorja.Collections.Cofree,
                        Subtests.Patchable,
                        Subtests.Primitives
-
-  build-depends:       base >= 4.7 && < 5,
-                       zorja,
-                       distributive,
-                       comonad,
-                       text,
-                       groups,
-                       hedgehog
-
                       
