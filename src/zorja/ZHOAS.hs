@@ -85,9 +85,9 @@ zdApplyPatch zv = let (x,dx) = zdEval zv
                   in patch x dx
 
 
-zdEval :: forall a. (Patchable a) => ZDExpr a -> (a, PatchDelta a)
+zdEval :: forall a. (Patchable a, PatchInstance (PatchDelta a)) => ZDExpr a -> (a, PatchDelta a)
 zdEval (ZDF zf)   = (f,df)
-    where f = \a -> zdValue $ zf (ZDV a mempty)
+    where f = \a -> zdValue $ zf (ZDV a nopatch)
           df = \a -> \da -> zdPatch $ zf (ZDV a da)
 zdEval (ZDV a da) = (a, da)
 
@@ -213,6 +213,10 @@ instance Monoid (BoolChange) where
     mempty = NoChange
     mappend = (<>)
 
+instance PatchInstance BoolChange where
+    mergepatches a b = a <> b
+    nopatch = mempty
+
 
 newtype ZBool = ZBool { unZBool :: Bool } deriving (Eq)
 
@@ -250,7 +254,7 @@ zIf =
                                         (x2,dx2) = zdEval z2
                                         patchedchanges = changes (patch x1 dx1) (patch x2 dx2)
                                     in
-                                        ZDV x1 (dx1 <> patchedchanges)
+                                        ZDV x1 (mergepatches dx1 patchedchanges)
                             in
                                 if (unZBool zb)
                                 then -- true to false
@@ -294,7 +298,7 @@ zxvelocity (ZXFunc df) = snd . unDF df
 instance ZHOAS ZXExpr where
     type ZOk ZXExpr a = Patchable a
     -- DFunc here is a -> (b, da -> db)
-    lam zf  = ZXFunc $ DF $ \a -> let b = zxposition (zf (ZXVal a mempty))
+    lam zf  = ZXFunc $ DF $ \a -> let b = zxposition (zf (ZXVal a nopatch))
                                       dab = \da -> let aa = ZXVal a da
                                                        bb = zf aa
                                                    in zxvelocity bb
