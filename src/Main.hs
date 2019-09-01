@@ -281,4 +281,3 @@ main = do
     putStrLn $ show x
 
     testProcessDudeValue
-

@@ -42,14 +42,17 @@ library
 
 test-suite zorja-test
   type:                exitcode-stdio-1.0
-  main-is:             TestRoot.hs
+  main-is:             TestMain.hs
   hs-source-dirs:      test, src
   ghc-options:         -Wall -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
   default-language:    Haskell2010
   other-modules:       Zorja.Patchable, 
                        Zorja.Primitives,
                        Zorja.ZHOAS, 
-                       Zorja.FunctorDExpr
+                       Zorja.FunctorDExpr,
+                       Subtests.Patchable,
+                       Subtests.Primitives
+
   build-depends:       base >= 4.7 && < 5,
                        zorja,
                        distributive,
