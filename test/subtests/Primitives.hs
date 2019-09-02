@@ -12,14 +12,14 @@ import qualified Hedgehog.Range as Range
 import Zorja.Patchable
 import Zorja.Primitives
 
-import Subtests.Patchable
+import Subtests.PatchGen
 
 --
 -- | Generator for the ReplaceOnly primitive.  Given a value generator
 --  this will produce something to generate values and deltas.
 --
-replaceOnlyGenerator :: Gen a -> PatchableGen (ReplaceOnly a)
-replaceOnlyGenerator g =
+gen_ReplaceOnly :: Gen a -> PatchableGen (ReplaceOnly a)
+gen_ReplaceOnly g =
     PatchableGen
     {
         genValue = fmap ReplaceOnly g,

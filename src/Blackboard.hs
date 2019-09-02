@@ -18,7 +18,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Main where
+module Blackboard where
 
 import GHC.Generics
 
@@ -274,6 +274,26 @@ testZHOAS = do
     let b' = patch b db
     putStrLn $ "v': " ++ show v' ++ "     b': " ++ show b'
 
+testList :: ListX ReplaceOnly (Sum Int)
+testList = ListX [ReplaceOnly (Sum 3), ReplaceOnly (Sum 5)]
+
+testListD :: PatchDelta (ListX ReplaceOnly (Sum Int))
+--testListD :: ListXD Replacing (ListX ReplaceOnly Int)
+testListD = ListX $ [Replacing Nothing,
+                        Replacing (Just (Sum (6::Int)))]
+
+testListFDE :: FunctorDExpr (ListX ReplaceOnly) (Sum Int)
+testListFDE = FDE testList testListD
+
+
+-- try a hylomorphism...
+-- - starting with a FunctorDExpr (ListX ReplaceOnly) (Sum Int)
+-- - unfold into a ListX with coalListXFDE
+-- - then fold up with mergeListXFDE
+testListHylo :: FunctorDExpr ReplaceOnly (Sum Int)
+testListHylo = hylo mergeListXFDE coalgListXFDE testListFDE
+
+    
 
 main :: IO ()
 main = do
