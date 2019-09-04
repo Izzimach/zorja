@@ -2,13 +2,20 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Zorja.Collections.ZJIntMap 
     (
-        ZJIntMap (..)
+        ZJIntMap (..),
+        ZJItemMap (..),
+        ZJItemMapD (..),
+        ZJItem (..),
+        ZJPatch (..),
+        zjItemMapFromList,
+        zjItemMapDFromList
     ) where
 
 import Data.Monoid
@@ -52,18 +59,33 @@ instance (Patchable (f a), PatchInstance (FunctorDelta f a)) => Patchable (ZJInt
 
     changes (ZJI a) (ZJI a') = undefined
 
+--
+-- ZJItem and ZJPatch
+--
+
 
 -- | 'ZJItem' represents a possible value like 'Maybe' but it combines
 --  with 'ZJPatch' to produce a full 'FunctorDExpr' where you can add and
 --  delete elements.
-data ZJItem f a = ZJEmpty | ZJData (f a)
+data ZJItem f a = 
+      ZJEmpty 
+    | ZJData (f a)
     deriving (Eq, Show)
 
 instance (Functor f) => Functor (ZJItem f) where
     fmap _ ZJEmpty     = ZJEmpty
     fmap f (ZJData a) = ZJData (fmap f a)
 
-data ZJPatch f a = ZJDelta (FunctorDelta f a) | ZJAdd (f a) | ZJDelete
+instance (Applicative f) => Applicative (ZJItem f) where
+    pure x = ZJData $ pure x
+    ZJEmpty     <*> _          = ZJEmpty
+    _           <*> _          = ZJEmpty
+    (ZJData fa) <*> (ZJData b) = ZJData (fa <*> b)
+
+data ZJPatch f a = 
+      ZJDelta (FunctorDelta f a)
+    | ZJAdd (f a)
+    | ZJDelete
 
 instance (Eq (f a), Eq (FunctorDelta f a)) => Eq (ZJPatch f a) where
     (ZJAdd a) == (ZJAdd b)         = (a == b)
@@ -72,7 +94,9 @@ instance (Eq (f a), Eq (FunctorDelta f a)) => Eq (ZJPatch f a) where
     _            == _              = False
 
 instance (Show (f a), Show (FunctorDelta f a)) => Show (ZJPatch f a) where
-    show _ = ""
+    show (ZJAdd a) = "ZJAdd " ++ show a
+    show (ZJDelete) = "ZJDelete"
+    show (ZJDelta da) = "ZJDelta " ++ show da
 
 instance (FDEFunctor f) => Functor (ZJPatch f) where
     fmap f (ZJDelta da) = ZJDelta $ fmapFD f da
@@ -89,10 +113,11 @@ instance (FDEFunctor f,
             => PatchInstance (ZJPatch f a) where
     mergepatches (ZJDelta da0) (ZJDelta da1) = ZJDelta (mergepatches da0 da1)
     mergepatches (ZJAdd     a) (ZJDelta da)  = ZJAdd $ patch a (fromFD da)
-    mergepatches (ZJDelete)    (ZJDelta da)  = ZJDelete
+    mergepatches (ZJDelete)    (ZJDelta _)   = ZJDelete
     -- add and delete just replace whatever came before
     mergepatches _             (ZJAdd da1)   = ZJAdd da1
     mergepatches _             (ZJDelete)    = ZJDelete
+
     nopatch = ZJDelta nopatch
 
 instance (FDEFunctor f,
@@ -102,13 +127,12 @@ instance (FDEFunctor f,
             => Patchable (ZJItem f a) where
     patch _           (ZJAdd a)    = ZJData a
     patch ZJEmpty     _            = ZJEmpty
-    patch (ZJData _)  (ZJAdd a)    = ZJData a
     patch (ZJData _)  ZJDelete     = ZJEmpty
     patch (ZJData a)  (ZJDelta da) = ZJData (patch a (fromFD da))
 
     changes ZJEmpty     ZJEmpty      = ZJDelta nopatch
     changes ZJEmpty     (ZJData a)   = ZJAdd a
-    changes (ZJData a)  ZJEmpty      = ZJDelete
+    changes (ZJData _)  ZJEmpty      = ZJDelete
     changes (ZJData a)  (ZJData a')  = ZJDelta $ toFD (changes a a')
 
 instance (FDEFunctor f) => FDECompatible (ZJItem f) where
@@ -123,3 +147,166 @@ instance (FDEFunctor f) => FDECompatible (ZJItem f) where
 
     toFD z = z
     fromFD z = z
+
+instance (FDEFunctor f) => FDEFunctor (ZJItem f) where
+    fmapFDE f (FDE a da) = FDE (fmap f a) (fmap f da)
+
+    fmapFD f da = fmap f da
+
+instance () => FDEDistributive (ZJItem) where
+    distributeFDE (FDE fa dfa) = wubwub fa dfa
+        where
+            wubwub _           (ZJAdd a)    = ZJData (FDE a nopatch)
+            wubwub ZJEmpty     _            = ZJEmpty
+            wubwub (ZJData _)  ZJDelete     = ZJEmpty
+            wubwub (ZJData a)  (ZJDelta da) = ZJData (FDE a da)
+        
+instance (FDETraversable f, FDEFunctor f, FDECompatible f)
+        => FDETraversable (ZJItem f) where
+    sequenceFDE (FDE fa dfa) = buwbuw fa dfa
+        where
+            buwbuw _           (ZJAdd a)    = ZJData $ sequenceFDE (FDE a nopatch)
+            buwbuw ZJEmpty     _            = ZJEmpty
+            buwbuw (ZJData _)  ZJDelete     = ZJEmpty
+            buwbuw (ZJData a)  (ZJDelta da) = ZJData $ sequenceFDE (FDE a da)
+
+
+
+--
+-- ZJItemMap and ZJItemMapD
+--
+
+    
+-- | An 'Intmap' with 'ZJItem' as a wrapping functor has the ability
+--   to distribute and properly handle adding and removing elements.
+newtype ZJItemMap f a = ZJIM (M.IntMap (ZJItem f a))
+    deriving (Show)
+    deriving (Semigroup, Monoid) via (M.IntMap (ZJItem f a))
+
+instance (Eq (f a)) => Eq (ZJItemMap f a) where
+    (ZJIM as) == (ZJIM bs) =
+        -- filter out ZJEmpty values, which are equivalent to missing values
+        let as' = M.filter (/= ZJEmpty) as
+            bs' = M.filter (/= ZJEmpty) bs
+        in
+            as' == bs'
+
+instance (Functor f) => Functor (ZJItemMap f) where
+    fmap f (ZJIM vs) = ZJIM $ fmap (fmap f) vs
+
+newtype ZJItemMapD f a = ZJIMD (M.IntMap (ZJPatch f a))
+    deriving ()
+    deriving (Semigroup, Monoid) via (M.IntMap (ZJPatch f a))
+
+instance (Eq (ZJPatch f a), PatchInstance (FunctorDelta f a)) => Eq (ZJItemMapD f a) where
+    (ZJIMD as) == (ZJIMD bs)    =
+        -- filter out nopatch values, which are equivalent to missing values
+        let as' = M.filter (/= (ZJDelta nopatch)) as
+            bs' = M.filter (/= (ZJDelta nopatch)) bs
+        in
+            as' == bs'
+
+instance (Show (ZJPatch f a)) => Show (ZJItemMapD f a) where
+    show (ZJIMD a) = "(ZJIMD " ++ show a ++ ")"
+
+instance (FDEFunctor f) => Functor (ZJItemMapD f) where
+    fmap f (ZJIMD vs) = ZJIMD $ fmap (fmap f) vs
+
+
+
+type instance PatchDelta (ZJItemMap f a) = ZJItemMapD f a
+type instance FunctorDelta (ZJItemMap f) = ZJItemMapD f
+
+instance (FDEFunctor f,
+          FDEConstraint f a,
+          Patchable (f a),
+          PatchInstance (FunctorDelta f a),
+          PatchInstance (ZJItemMapD f a)) 
+              => Patchable (ZJItemMap f a) where
+    patch (ZJIM a) (ZJIMD da) = ZJIM (M.mergeWithKey both values deltas a da)
+        where
+            both key v dv = case (patch v dv) of
+                               ZJEmpty  -> Nothing
+                               ZJData x -> Just $ ZJData x
+            -- a missing delta is considered equivalent to 'nopatch'
+            -- so we keep these unchanged
+            values a      = a
+            -- data only in the delta map, a "ZJEmpty" value is implied
+            -- so we keep only adds
+            deltas da     = M.mapMaybe onlyAdds da
+                where onlyAdds (ZJAdd x)   = Just $ ZJData x
+                      onlyAdds (ZJDelta _)  = Nothing
+                      onlyAdds ZJDelete     = Nothing
+            
+
+    changes (ZJIM a) (ZJIM a') = ZJIMD (M.mergeWithKey diff inFirst inSecond a a')
+        where
+            -- if items are in both a an a' we just diff them
+            diff key v v' = Just $ changes v v'
+            -- items in a are deleted so they aren't in a'
+            inFirst x    = M.mapMaybe (\case
+                                           ZJEmpty -> Nothing
+                                           ZJData y -> Just ZJDelete) x
+            -- items not in a are added so they are in a'
+            inSecond x'  = M.mapMaybe (\case
+                                           ZJEmpty -> Nothing
+                                           ZJData y -> Just (ZJAdd y)) x'
+
+instance (FDEFunctor f, 
+          FDEConstraint f a,
+          Patchable (f a),
+          PatchInstance (FunctorDelta f a)) => PatchInstance (ZJItemMapD f a) where
+    mergepatches (ZJIMD da1) (ZJIMD da2) = ZJIMD (M.unionWith mergepatches da1 da2)
+
+    nopatch = ZJIMD M.empty
+
+instance (FDEFunctor f) => FDECompatible (ZJItemMap f) where
+    type FDEConstraint (ZJItemMap f) a = (FDEConstraint f a,
+                                          FDEFunctor f,
+                                          Patchable (f a),
+                                          PatchInstance (FunctorDelta f a))
+
+    toFDE z = let (v,dv) = zdEval z
+              in FDE v dv
+    fromFDE (FDE a da) = ZDV a da
+
+    toFD z = z
+    fromFD z = z
+
+instance (FDEFunctor f) => FDEFunctor (ZJItemMap f) where
+    fmapFD f (ZJIMD vs) = ZJIMD $ fmap (fmap f) vs
+    fmapFDE f (FDE v dv) = FDE (fmap f v) (fmapFD f dv)
+
+instance () => FDEDistributive (ZJItemMap) where
+    --distributeFDE :: (FDEConstraint (ZJItemMap fa) a) => FunctorDExpr (ZJItemMap fa) a -> ZJItemMap (FunctorDExpr fa) a
+    distributeFDE (FDE (ZJIM a) (ZJIMD da)) = 
+        ZJIM $ M.mergeWithKey both onlyValues onlyDeltas a da
+        where
+            --both :: (FDEFunctor fa, FDEConstraint fa a) => M.Key -> ZJItem fa a -> ZJPatch fa a -> Maybe (ZJItem (FunctorDExpr fa) a)
+            --onlyValues :: IntMap (ZJItem fa a) -> IntMap (ZJItem (FunctorDExpr fa) a)
+            --onlyDeltas :: IntMap (ZJPatch fa a) -> IntMap (ZJItem (FunctorDExpr fa) a)
+
+            both _key v dv = Just $ distributeFDE $ FDE v dv
+            -- no delta implies a "nochange" delta
+            onlyValues vs = M.map (\x -> distributeFDE (FDE x nopatch)) vs
+            -- no value implies it starts ZJEmpty
+            onlyDeltas dvs = M.map (\x -> distributeFDE (FDE ZJEmpty x)) dvs
+
+instance (FDEFunctor f, FDETraversable f) => FDETraversable (ZJItemMap f) where
+    sequenceFDE (FDE (ZJIM a) (ZJIMD da)) =
+        ZJIM $ M.mergeWithKey both onlyValues onlyDeltas a da
+        where
+            both _key v dv = Just $ sequenceFDE $ FDE v dv
+            -- no delta implies a "nochange" delta
+            onlyValues vs = M.map (\x -> sequenceFDE (FDE x nopatch)) vs
+            -- no value implies it starts ZJEmpty
+            onlyDeltas dvs = M.map (\x -> sequenceFDE (FDE ZJEmpty x)) dvs
+
+zjItemMapFromList :: [f a] -> ZJItemMap f a
+zjItemMapFromList l = ZJIM $ M.fromList $ zip [1..] (fmap ZJData l)
+
+zjItemMapDFromList :: [FunctorDelta f a] -> [f a] -> ZJItemMapD f a
+zjItemMapDFromList patches adds =
+    let combinedchanges = (fmap ZJDelta patches) ++ (fmap ZJAdd adds)
+    in
+        ZJIMD $ M.fromList $ zip [1..] combinedchanges

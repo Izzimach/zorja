@@ -51,9 +51,8 @@ library
 test-suite zorja-test
   import: deps, test-deps
   type:                exitcode-stdio-1.0
-  main-is:             TestMain.hs
-  hs-source-dirs:      test
-  build-depends:       zorja
+  main-is:             Main.hs
+  hs-source-dirs:      test, src
   other-modules:       Zorja.Patchable,
                        Zorja.Primitives,
                        Zorja.ZHOAS,
@@ -61,6 +60,8 @@ test-suite zorja-test
                        Zorja.Collections.ListX,
                        Zorja.Collections.ZJIntMap,
                        Zorja.Collections.Cofree,
-                       Subtests.Patchable,
-                       Subtests.Primitives
+                       Subtests.PatchGen,
+                       Subtests.Primitives,
+                       Subtests.ListX,
+                       Subtests.ZJIntMap
                       

@@ -65,10 +65,6 @@ instance PatchInstance (Replacing a) where
 
     
     
---
--- FunctorDExpr implementations for ReplaceOnly
---
-    
 instance (Semigroup a) => Semigroup (FunctorDExpr ReplaceOnly a) where
     (FDE (ReplaceOnly a) (Replacing da)) <> (FDE (ReplaceOnly b) (Replacing db)) =
             let c = case (da,db) of
@@ -81,6 +77,10 @@ instance (Semigroup a) => Semigroup (FunctorDExpr ReplaceOnly a) where
 instance (Monoid a) => Monoid (FunctorDExpr ReplaceOnly a) where
     mempty = FDE mempty mempty
 
+--
+-- FunctorDExpr implementations for ReplaceOnly
+--
+    
 instance FDECompatible ReplaceOnly where
     type FDEConstraint ReplaceOnly a = (Eq a)
     toFDE z = let (v,dv) = zdEval z
@@ -89,5 +89,6 @@ instance FDECompatible ReplaceOnly where
     toFD (Replacing a) = Replacing a
     fromFD (Replacing a) = Replacing a
 
-    
-
+instance FDEFunctor ReplaceOnly where
+    fmapFD f x = fmap f x
+    fmapFDE f (FDE x dx) = FDE (fmap f x) (fmap f dx)

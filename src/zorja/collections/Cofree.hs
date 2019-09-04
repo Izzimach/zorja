@@ -115,7 +115,7 @@ instance (FDECompatible fa, FDECompatible fb) => FDECompatible (CofD fb fa) wher
 
 
 instance (Functor fb, FDETraversable fb) => FDEDistributive (CofD fb) where 
-    distributeFDE :: FunctorDExpr (CofD fb fa) a -> CofD fb (FunctorDExpr fa) a
+    distributeFDE :: (FDEConstraint (CofD fb fa) a) => FunctorDExpr (CofD fb fa) a -> CofD fb (FunctorDExpr fa) a
     distributeFDE (FDE x dx) =
         let (a  :<< as)  = x
             (da :<# das) = dx
@@ -125,7 +125,7 @@ instance (Functor fb, FDETraversable fb) => FDEDistributive (CofD fb) where
             x' :<< (fmap distributeFDE dx')
 
 instance (Applicative fa, Applicative fb, FDETraversable fa, FDETraversable fb) => FDETraversable (CofD fb fa) where
-    sequenceFDE :: FunctorDExpr (CofD fb fa) (fx x) -> CofD fb fa (FunctorDExpr fx x)
+    sequenceFDE :: (FDEConstraint (CofD fb fa) (fx x)) => FunctorDExpr (CofD fb fa) (fx x) -> CofD fb fa (FunctorDExpr fx x)
     sequenceFDE (FDE x dx) =
         let (a :<< as) = x
             (da :<# das) = dx
@@ -155,7 +155,8 @@ instance (
 
 
 combineCofreeFDE ::
-    (FDETraversable (fb x)) =>
+    (FDETraversable (fb x),
+     FDEConstraint (fb x) (CofD (fb x) fa a)) =>
         FunctorDExpr (CofD (fb x) fa) a -> 
         CofDF (fb x) (FunctorDExpr fa) a (FunctorDExpr (CofD (fb x) fa) a)
 combineCofreeFDE (FDE (a :<< as) (da :<# das)) =

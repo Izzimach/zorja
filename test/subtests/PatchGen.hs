@@ -39,6 +39,13 @@ toFDEGen :: (FDECompatible f, FDEConstraint f a) =>
     PatchableGen (f a) -> FunctorDExprGen f a
 toFDEGen (PatchableGen g dg) = FDEGen g (fmap (fmap toFD) dg)
 
+-- | Given a PatchableGen will generate a sample value and delta
+patchsample :: (Patchable a) => PatchableGen a -> IO (ZDExpr a)
+patchsample (PatchableGen g dg) = do
+    x  <- Gen.sample g
+    dx <- Gen.sample (dg x)
+    return $ ZDV x dx
+
 -- | A subprop used to build props for specific types/structures.
 --   Check that patch merges work, so that patching with
 --   'da3 = mergepatch da1 da2' produces the same result as
@@ -56,9 +63,13 @@ subprop_patchmerge (PatchableGen g dg) =
         dx2 <- forAll (dg (patch x dx1))
         (patch (patch x dx1) dx2) === (patch x (mergepatches dx1 dx2))
 
--- | Given a PatchableGen will generate a sample value and delta
-patchsample :: (Patchable a) => PatchableGen a -> IO (ZDExpr a)
-patchsample (PatchableGen g dg) = do
-    x  <- Gen.sample g
-    dx <- Gen.sample (dg x)
-    return $ ZDV x dx
+-- | A test for patches/changes, if we patch 'a' with 'changes a b' the
+--  result should be 'b'
+subprop_patchchanges ::
+    (Eq a, Show a, Show (PatchDelta a), Patchable a)
+        => PatchableGen a -> PropertyT IO ()
+subprop_patchchanges (PatchableGen g dg) =
+    do
+        a   <- forAll g
+        b   <- forAll g
+        patch a (changes a b) === b

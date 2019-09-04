@@ -39,13 +39,13 @@ class (FDECompatible fd) => FDEFunctor fd where
 
 -- | 'FDEDistributive' allows you to distribute a 'Functor'-like structure
 -- over 'FunctorDExpr'
-class FDEDistributive (fd :: (Type -> Type) -> Type -> Type) where
-    distributeFDE :: FunctorDExpr (fd fx) x -> fd (FunctorDExpr fx) x
+class () => FDEDistributive (fd :: (Type -> Type) -> Type -> Type) where
+    distributeFDE :: (FDEConstraint (fd fa) a) => FunctorDExpr (fd fa) a -> fd (FunctorDExpr fa) a
 
 -- | 'FDETraversable' allows you to run 'sequenceA'
 -- over a 'FunctorDExpr'
 class (FDECompatible fd) => FDETraversable (fd) where
-    sequenceFDE :: FunctorDExpr fd (fx x) -> fd (FunctorDExpr fx x)
+    sequenceFDE :: (FDEConstraint fd (fx x)) => FunctorDExpr fd (fx x) -> fd (FunctorDExpr fx x)
 
 
 --
