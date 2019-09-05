@@ -79,11 +79,11 @@ instance (Functor f) => FDECompatible (ListX f) where
     fromFD (ListX a) = ListX a
 
 instance FDEDistributive ListX where
-    distributeFDE :: (FDEConstraint (ListX f) a) => FunctorDExpr (ListX f) a -> ListX (FunctorDExpr f) a
+    --distributeFDE :: (FDEConstraint (ListX f) a) => FunctorDExpr (ListX f) a -> ListX (FunctorDExpr f) a
     distributeFDE (FDE (ListX as) (ListX das)) = ListX $ zipWith FDE as das
 
 instance (FDETraversable f) => FDETraversable (ListX f) where
-    sequenceFDE :: (FDEConstraint (ListX f) (g a)) => FunctorDExpr (ListX f) (g a) -> ListX f (FunctorDExpr g a)
+    --sequenceFDE :: (FDEConstraint (ListX f) (g a)) => FunctorDExpr (ListX f) (g a) -> ListX f (FunctorDExpr g a)
     sequenceFDE (FDE (ListX as) (ListX das)) = ListX $ fmap sequenceFDE $ zipWith FDE as das
 
 instance (Functor f, Functor (FunctorDelta f)) => FDEFunctor (ListX f) where

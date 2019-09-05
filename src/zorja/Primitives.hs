@@ -16,12 +16,7 @@ module Zorja.Primitives
     where
 
 import Data.Functor.Identity
-import Data.Semigroup
-import Data.Text
 import Data.Maybe
-import Data.Monoid hiding (Last)
-
-import Control.Applicative
 
 import Zorja.Patchable
 import Zorja.FunctorDExpr
@@ -59,7 +54,7 @@ instance PatchInstance (Replacing a) where
         let c = case (a,b) of
                     (Nothing, x) -> x
                     (x, Nothing) -> x
-                    (Just a', Just b') -> Just b'
+                    (Just _, Just b') -> Just b'
         in Replacing c
     nopatch = Replacing Nothing
 

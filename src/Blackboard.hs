@@ -18,6 +18,10 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
+--
+-- | A "Scratch Buffer" used for experimental code.
+--
+
 module Blackboard where
 
 import GHC.Generics

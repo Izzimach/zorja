@@ -230,10 +230,10 @@ instance (FDEFunctor f,
                                ZJData x -> Just $ ZJData x
             -- a missing delta is considered equivalent to 'nopatch'
             -- so we keep these unchanged
-            values a      = a
+            values v      = v
             -- data only in the delta map, a "ZJEmpty" value is implied
             -- so we keep only adds
-            deltas da     = M.mapMaybe onlyAdds da
+            deltas dv     = M.mapMaybe onlyAdds dv
                 where onlyAdds (ZJAdd x)   = Just $ ZJData x
                       onlyAdds (ZJDelta _)  = Nothing
                       onlyAdds ZJDelete     = Nothing
@@ -242,11 +242,11 @@ instance (FDEFunctor f,
     changes (ZJIM a) (ZJIM a') = ZJIMD (M.mergeWithKey diff inFirst inSecond a a')
         where
             -- if items are in both a an a' we just diff them
-            diff key v v' = Just $ changes v v'
+            diff _key v v' = Just $ changes v v'
             -- items in a are deleted so they aren't in a'
             inFirst x    = M.mapMaybe (\case
                                            ZJEmpty -> Nothing
-                                           ZJData y -> Just ZJDelete) x
+                                           ZJData _ -> Just ZJDelete) x
             -- items not in a are added so they are in a'
             inSecond x'  = M.mapMaybe (\case
                                            ZJEmpty -> Nothing
