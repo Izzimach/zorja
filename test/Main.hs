@@ -4,25 +4,29 @@
 
 module Main (main) where
 
+import Data.Semigroup
 import qualified Data.Text as T
 
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 
+import Zorja.Primitives
+
 
 import Subtests.PatchGen
 import Subtests.Primitives
 import Subtests.ListX
 import Subtests.ZJIntMap
+import Subtests.Cofree
 
 -- some basic generators
 
 basic_intgen :: Gen Integer
-basic_intgen = Gen.integral $ Range.linear (-10000::Integer) (10000::Integer)
+basic_intgen = Gen.integral $ Range.linear (0::Integer) (10000::Integer)
 
 basic_floatgen :: Gen Float
-basic_floatgen = Gen.float $ Range.linearFrac (-10000.0::Float) (10000.0::Float)
+basic_floatgen = Gen.float $ Range.linearFrac (0.0::Float) (10000.0::Float)
 
 basic_textgen :: Gen T.Text
 basic_textgen = Gen.text (Range.linear 0 20) Gen.unicode
@@ -33,6 +37,14 @@ basic_replaceOnlytext = gen_ReplaceOnly basic_textgen
 
 basic_ListXfloat = fromFDEGen . gen_ListX . toFDEGen $ basic_replaceOnlyfloat
 basic_ZJItemMapint = fromFDEGen . gen_ZJItemMap . toFDEGen $ basic_replaceOnlyfloat
+
+basic_replaceOnlySumInt :: PatchableGen (ReplaceOnly (Sum Integer))
+basic_replaceOnlySumInt = gen_ReplaceOnly (fmap (Sum) basic_intgen)
+
+patchgen_CofTreeint = fromFDEGen $ 
+    gen_CofDTree 
+        (toFDEGen basic_replaceOnlySumInt)
+        (gen_ZJItemMap . gen_ReplaceOnlyFDE)
 
 --
 -- tests of basic patch properties

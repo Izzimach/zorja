@@ -30,14 +30,6 @@ newtype ListX f a = ListX [f a]
 instance (Functor f) => Functor (ListX f) where
     fmap f (ListX as) = ListX (fmap (fmap f) as) 
 
-instance Recursive (ListX f a) where
-    project (ListX [])     = NilX
-    project (ListX (x:xs)) = ConsX x (ListX xs)
-
-instance Corecursive (ListX f a) where
-    embed (ConsX x (ListX xs)) = ListX (x:xs)
-    embed NilX                 = ListX []
-
 instance (Applicative f) => Applicative (ListX f) where
     pure x = ListX [pure x]
     (ListX a) <*> (ListX b) = ListX (liftA2 (<*>) a b)
@@ -67,6 +59,14 @@ instance Functor (ListXF a) where
 
 type instance Base (ListX f a) = ListXF (f a)
     
+instance Recursive (ListX f a) where
+    project (ListX [])     = NilX
+    project (ListX (x:xs)) = ConsX x (ListX xs)
+
+instance Corecursive (ListX f a) where
+    embed (ConsX x (ListX xs)) = ListX (x:xs)
+    embed NilX                 = ListX []
+
 type instance (PatchDelta (ListX f a)) = (ListX (FunctorDelta f) a)
 type instance FunctorDelta (ListX f) = ListX (FunctorDelta f)
 
@@ -75,16 +75,21 @@ instance (Functor f) => FDECompatible (ListX f) where
     toFDE z = let (v,dv) = zdEval z
               in FDE v dv
     fromFDE (FDE v dv) = ZDV v dv
-    toFD (ListX a) = ListX a
-    fromFD (ListX a) = ListX a
+    --toFD (ListX a) = ListX a
+    --fromFD (ListX a) = ListX a
 
-instance FDEDistributive ListX where
-    --distributeFDE :: (FDEConstraint (ListX f) a) => FunctorDExpr (ListX f) a -> ListX (FunctorDExpr f) a
-    distributeFDE (FDE (ListX as) (ListX das)) = ListX $ zipWith FDE as das
+{-instance (FDEDistributive f) => FDEDistributive (ListX f) where
+    --distributeFDE :: (FDEConstraint (ListX f) a) => ListX f (FunctorDExpr fa a) -> FunctorDExpr (ListX f) (fa a)
+    distributeFDE (ListX fdes) = FDE (ListX (fmap getA fdes')) (ListX (fmap getDA fdes'))
+        where
+            fdes' = fmap distributeFDE fdes
+            getA (FDE a _) = a
+            getDA (FDE _ da) = da
 
 instance (FDETraversable f) => FDETraversable (ListX f) where
     --sequenceFDE :: (FDEConstraint (ListX f) (g a)) => FunctorDExpr (ListX f) (g a) -> ListX f (FunctorDExpr g a)
     sequenceFDE (FDE (ListX as) (ListX das)) = ListX $ fmap sequenceFDE $ zipWith FDE as das
+-}
 
 instance (Functor f, Functor (FunctorDelta f)) => FDEFunctor (ListX f) where
     fmapFDE f (FDE a da) = FDE (fmap f a) (fmapFD f da)

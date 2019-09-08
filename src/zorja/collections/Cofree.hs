@@ -12,9 +12,15 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Zorja.Collections.Cofree where
+module Zorja.Collections.Cofree (
+    CofD(..),
+    CofDD(..),
+    coalgCofreeFDE
+    ) where
     
 import Data.Functor.Foldable
+import Data.Functor.Identity
+import Data.Kind
 import Data.Semigroup
 
 import Control.Applicative
@@ -26,8 +32,8 @@ import Zorja.FunctorDExpr
 import Zorja.Collections.ListX
 
 --
--- Cofree with FunctorDelta added
---
+-- | A version of 'Cofree' that can be used with
+--   'FunctorDelta' and 'FunctorDExpr'
 
 data CofD fb fa a = (fa a) :<< (fb (CofD fb fa a))
 
@@ -97,13 +103,13 @@ instance (FDECompatible fa, FDECompatible fb) => FDECompatible (CofD fb fa) wher
     type FDEConstraint (CofD fb fa) a = 
         (Patchable (fa a),
          Patchable (fb (CofD fb fa a)),
-         Monoid (fb (CofD fb fa a)),
-         PatchInstance (CofDD fb fa a),
+         Monoid (fb a),
+         PatchInstance (FunctorDelta fb (CofD fb fa a)),
          Monoid (fb (CofD fb (FunctorDelta fa) a)),
          Monoid (FunctorDelta fa a), 
          FDEConstraint fa a,
          FDEConstraint fb (CofD fb fa a),
-         FunctorDelta fb (CofD fb fa a) ~ PatchDelta (fb (CofD fb fa a)),
+         FunctorDelta fb a ~ PatchDelta (fb a),
          FunctorDelta fa a ~ PatchDelta (fa a))
     --toFDE :: ZDExpr (CofD fb fa a) -> FunctorDExpr (CofD fb fa) a
     toFDE z = let (v,dv) = zdEval z
@@ -113,16 +119,13 @@ instance (FDECompatible fa, FDECompatible fb) => FDECompatible (CofD fb fa) wher
     toFD z = z
     fromFD z = z
 
-
-instance (Functor fb, FDETraversable fb) => FDEDistributive (CofD fb) where 
-    distributeFDE :: (FDEConstraint (CofD fb fa) a) => FunctorDExpr (CofD fb fa) a -> CofD fb (FunctorDExpr fa) a
-    distributeFDE (FDE x dx) =
-        let (a  :<< as)  = x
-            (da :<# das) = dx
-            x' = (FDE a da)
-            dx' = sequenceFDE (FDE as das)
+instance (Functor fb, FDEDistributive fb, FDEDistributive fa) => FDEDistributive (CofD fb fa) where 
+    distributeFDE :: (FDEConstraint (CofD fb fa) (fx x)) => CofD fb fa (FunctorDExpr fx x) -> FunctorDExpr (CofD fb fa) (fx x)
+    distributeFDE (a :<< as) = 
+        let (FDE v dv) = distributeFDE a
+            (FDE x xs) = distributeFDE $ fmap distributeFDE as
         in
-            x' :<< (fmap distributeFDE dx')
+            FDE (v :<< x) (dv :<# xs)
 
 instance (Applicative fa, Applicative fb, FDETraversable fa, FDETraversable fb) => FDETraversable (CofD fb fa) where
     sequenceFDE :: (FDEConstraint (CofD fb fa) (fx x)) => FunctorDExpr (CofD fb fa) (fx x) -> CofD fb fa (FunctorDExpr fx x)
@@ -134,6 +137,7 @@ instance (Applicative fa, Applicative fb, FDETraversable fa, FDETraversable fb) 
         in
             -- wha
             x' :<< (fmap sequenceFDE dx')
+
 
 instance (
             FDECompatible fa,
@@ -153,13 +157,18 @@ instance (
 
     changes (a :<< as) (a' :<< as') = (toFD (changes a a')) :<# (toFD (changes as as'))
 
-
-combineCofreeFDE ::
-    (FDETraversable (fb x),
-     FDEConstraint (fb x) (CofD (fb x) fa a)) =>
-        FunctorDExpr (CofD (fb x) fa) a -> 
-        CofDF (fb x) (FunctorDExpr fa) a (FunctorDExpr (CofD (fb x) fa) a)
-combineCofreeFDE (FDE (a :<< as) (da :<# das)) =
+--
+-- | Unfold @FunctorDExpr CofD@ into a 'CofDF'. Useful as a coalgebra for
+--   ana- and hylo- morphisms.
+--
+coalgCofreeFDE ::
+    (fb ~ fx x,
+     FDETraversable fb,
+     FDEConstraint fb a,
+     FDEConstraint fb (CofD fb fa a)) =>
+        FunctorDExpr (CofD fb fa) a -> 
+        CofDF fb (FunctorDExpr fa) a (FunctorDExpr (CofD fb fa) a)
+coalgCofreeFDE (FDE (a :<< as) (da :<# das)) =
     (FDE a da) :<= (sequenceFDE (FDE as das))
 
 

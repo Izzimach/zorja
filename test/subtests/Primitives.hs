@@ -6,10 +6,8 @@ module Subtests.Primitives where
 
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
-import qualified Hedgehog.Range as Range
 
 
-import Zorja.Patchable
 import Zorja.Primitives
 
 import Subtests.PatchGen
@@ -30,4 +28,22 @@ gen_ReplaceOnly g =
             ]
     }
 
+--
+-- replaceonly generation given a FDE generator
+--
+gen_ReplaceOnlyFDE :: FunctorDExprGen f a -> FunctorDExprGen ReplaceOnly (f a)
+gen_ReplaceOnlyFDE (FDEGen g _) =
+    FDEGen
+    {
+        genFValue = fmap ReplaceOnly g
+        ,
+        genFDelta = \_ ->
+            -- ReplaceOnly actually doesn't use the delta generator 'dg'
+            -- since all deltas are either Nothing or a new value
+            Gen.frequency
+            [
+                (1, Gen.constant $ Replacing Nothing),
+                (3, fmap (Replacing . Just) g)
+            ]
+    }
 

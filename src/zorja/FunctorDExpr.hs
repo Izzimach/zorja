@@ -16,12 +16,12 @@ import Zorja.ZHOAS
 -- |'FunctorDExpr' is a 'ZDExpr' where both 'a' and 'da' can be expressed as
 -- functors. You can switch between the two using 'toFDE' and 'fromFDE'
 
-data FunctorDExpr f a = FDE (f a) ((FunctorDelta f) a)
+data FunctorDExpr f a = FDE (f a) (FunctorDelta f a)
 
 -- |'FDECompatible' is for 'Functor's (and their associated 'FunctorDelta')
 -- that can be converted between 'ZDExpr' 'FunctorDExpr'
 
-class (Functor f) => FDECompatible f where
+class FDECompatible (f :: Type -> Type) where
     type FDEConstraint f a :: Constraint
 
     toFDE :: (FDEConstraint f a) => ZDExpr (f a) -> FunctorDExpr f a
@@ -33,19 +33,20 @@ class (Functor f) => FDECompatible f where
 -- | A 'FDFunctor' allows you to take a function normally used to 'fmap'
 --  on a functor 'fd' and instead apply it to a
 -- 'FunctorDelta fd' or 'FunctorDExpr fd'
-class (FDECompatible fd) => FDEFunctor fd where
-    fmapFD :: (a -> b) -> FunctorDelta fd a -> FunctorDelta fd b
-    fmapFDE :: (a -> b) -> FunctorDExpr fd a -> FunctorDExpr fd b
+class (Functor f, FDECompatible f) => FDEFunctor (f :: Type -> Type) where
+    fmapFD :: (a -> b) -> FunctorDelta f a -> FunctorDelta f b
+    fmapFDE :: (a -> b) -> FunctorDExpr f a -> FunctorDExpr f b
+
 
 -- | 'FDEDistributive' allows you to distribute a 'Functor'-like structure
 -- over 'FunctorDExpr'
-class () => FDEDistributive (fd :: (Type -> Type) -> Type -> Type) where
-    distributeFDE :: (FDEConstraint (fd fa) a) => FunctorDExpr (fd fa) a -> fd (FunctorDExpr fa) a
+class (FDECompatible fd) => FDEDistributive (fd :: Type -> Type) where
+    distributeFDE :: (FDEConstraint fd (fa a)) => fd (FunctorDExpr fa a) -> FunctorDExpr fd (fa a)
 
 -- | 'FDETraversable' allows you to run 'sequenceA'
 -- over a 'FunctorDExpr'
 class (FDECompatible fd) => FDETraversable (fd) where
-    sequenceFDE :: (FDEConstraint fd (fx x)) => FunctorDExpr fd (fx x) -> fd (FunctorDExpr fx x)
+    sequenceFDE :: (FDEConstraint fd (fa a)) => FunctorDExpr fd (fa a) -> fd (FunctorDExpr fa a)
 
 
 --
@@ -53,11 +54,11 @@ class (FDECompatible fd) => FDETraversable (fd) where
 --
 
 -- | Apply the patch stored in a FunctorDExpr
-fdeApplyPatch :: (FDECompatible f, FDEConstraint f a, Patchable (f a)) => FunctorDExpr f a -> f a
+fdeApplyPatch :: (FDEConstraint f a, FDECompatible f, Patchable (f a)) => FunctorDExpr f a -> f a
 fdeApplyPatch v = zdApplyPatch $ fromFDE v
 
 
-instance (Show (f a), Show ((FunctorDelta f) a)) => Show (FunctorDExpr f a) where
+instance (Show (f a), Show (FunctorDelta f a)) => Show (FunctorDExpr f a) where
     show (FDE fa dfa) = "(FDE " ++ show fa ++ "," ++ show dfa ++ ")"
 
 instance (Functor f, Functor (FunctorDelta f)) => Functor (FunctorDExpr f) where

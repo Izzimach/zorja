@@ -11,11 +11,13 @@
 module Zorja.Primitives 
     (
         ReplaceOnly(..),
-        Replacing(..)
+        Replacing(..),
+        DiffNum(..)
     )
     where
 
 import Data.Functor.Identity
+import Data.Semigroup
 import Data.Maybe
 
 import Zorja.Patchable
@@ -28,7 +30,7 @@ import Zorja.ZHOAS
 newtype ReplaceOnly a = ReplaceOnly a
     deriving (Eq, Show)
     deriving (Functor, Applicative) via Identity
-    deriving (Semigroup, Monoid, Num, Ord) via (Identity a)
+    deriving (Semigroup, Monoid, Num, Ord) via a
 
 -- | 'Replacing a' is the 'PatchDelta' of 'ReplaceOnly'. It 
 --  behaves as 'Maybe a' when used as a 'Monoid'. However, it
@@ -87,3 +89,25 @@ instance FDECompatible ReplaceOnly where
 instance FDEFunctor ReplaceOnly where
     fmapFD f x = fmap f x
     fmapFDE f (FDE x dx) = FDE (fmap f x) (fmap f dx)
+
+
+--
+-- | Difference Num's use the numeric difference as a delta. Really only works
+--   for unbounded integers 'Integer'. For other types the deltas might sometimes
+--   be unrepresentable, so things like @patch a (changes a b) = b@ might
+--   not hold.
+newtype DiffNum a = DNum (Sum a)
+    deriving (Eq, Show, Num, Ord, Semigroup, Monoid) via (Sum a)
+    deriving (Functor, Applicative) via Identity
+
+type instance PatchDelta (DiffNum a) = DiffNum a
+type instance FunctorDelta DiffNum = DiffNum
+
+instance (Num a, Eq a) => Patchable (DiffNum a) where
+    patch a da = a + da
+    changes a a' = a' - a
+
+instance (Num a) => PatchInstance (DiffNum a) where
+    mergepatches da db = da + db
+    nopatch = DNum mempty
+    

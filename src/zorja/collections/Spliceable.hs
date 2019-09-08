@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -37,7 +38,7 @@ import qualified Data.Vector.Distance as VD
 -- | the splice result will have a different length.
 --
 
-data SpliceAction a = SPLS
+data SpliceAction a = SPLA
     {
         start :: Integer,
         length :: Integer,
@@ -45,11 +46,25 @@ data SpliceAction a = SPLS
     }
     deriving (Eq, Show)
 
+instance Functor SpliceAction where
+    fmap f (SPLA st len val) = SPLA st len (f val)
+
 mkSplice :: Integer -> Integer -> a -> SpliceAction a
-mkSplice s l n = SPLS s l n
+mkSplice s l n = SPLA s l n
 
-type SpliceList a = [SpliceAction a]
+newtype SpliceList a = SPLS [SpliceAction a]
+    deriving (Eq, Show, Semigroup, Monoid) via ([SpliceAction a])
 
+
+instance Functor SpliceList where
+    fmap f (SPLS as) = SPLS $ fmap (fmap f) as
+
+fmapSpliceActions :: (SpliceAction a -> SpliceAction a) -> SpliceList a -> SpliceList a
+fmapSpliceActions f (SPLS as) = SPLS $ fmap f as
+
+instance PatchInstance (SpliceList a) where
+    mergepatches da db = undefined
+    nopatch = SPLS []
 
 class SpliceArray a where
     deltaToSplice :: PatchDelta a -> SpliceList a
@@ -58,7 +73,7 @@ class SpliceArray a where
     spliceInChunk :: a -> SpliceAction a -> a
 
 shiftSplice :: Integer -> SpliceAction a -> SpliceAction a
-shiftSplice offset (SPLS s l n) = SPLS (s + offset) l n
+shiftSplice offset (SPLA s l n) = SPLA (s + offset) l n
 
 concatSpliceDExpr :: forall a. (Patchable a, SpliceArray a, Semigroup a) => ZDExpr a -> ZDExpr a -> ZDExpr a
 concatSpliceDExpr l r =
@@ -71,7 +86,7 @@ concatSpliceDExpr l r =
         leftoffset = chunkSize tl
         -- adjust offsets of the right splice to take into account
         -- the offset of the left chunk
-        adjsplr = fmap (shiftSplice (toInteger leftoffset)) splr
+        adjsplr = fmapSpliceActions (shiftSplice (toInteger leftoffset)) splr
     -- if we apply the left splices first, than the length of the
     -- left chunk will change and the right splices will be wrong,
     -- so instead we apply the right splices first which won't
@@ -86,7 +101,7 @@ instance SpliceArray T.Text where
     deltaToSplice a = a
     spliceToDelta a = a
     chunkSize a = toInteger $ T.length a
-    spliceInChunk orig (SPLS s l n) =
+    spliceInChunk orig (SPLA s l n) =
         let prefix = T.take (fromInteger s)       orig
             suffix = T.drop (fromInteger (s + l)) orig
         in T.concat [prefix, n, suffix]
@@ -94,9 +109,9 @@ instance SpliceArray T.Text where
 type instance PatchDelta T.Text = SpliceList T.Text
 
 instance Patchable T.Text where
-    patch a da = foldl spliceInChunk a da
+    patch a (SPLS da) = foldl spliceInChunk a da
     changes a a' = -- punt for now, just replace it all
-        [SPLS 0 (chunkSize a) a']
+        SPLS [SPLA 0 (chunkSize a) a']
         
 --
 -- | SpliceArray instance for Data.Vector
@@ -109,7 +124,7 @@ instance SpliceArray (V.Vector a) where
     deltaToSplice a = a
     spliceToDelta a = a
     chunkSize a = toInteger $ V.length a
-    spliceInChunk orig (SPLS s l n) =
+    spliceInChunk orig (SPLA s l n) =
         let prefix = V.take (fromInteger s)       orig
             suffix = V.drop (fromInteger (s + l)) orig
         in V.concat [prefix, n, suffix]
@@ -117,8 +132,8 @@ instance SpliceArray (V.Vector a) where
 type instance PatchDelta (V.Vector a) = SpliceList (V.Vector a)
 
 instance (Eq a) => Patchable (V.Vector a) where
-    patch a da = foldl spliceInChunk a da
-    changes a a' = [SPLS 0 (chunkSize a) a'] -- not effiecient but technically correct
+    patch a (SPLS da) = foldl spliceInChunk a da
+    changes a a' = SPLS [SPLA 0 (chunkSize a) a'] -- not effiecient but technically correct
 
 
 --

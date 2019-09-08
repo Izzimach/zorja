@@ -30,8 +30,7 @@ common deps
                        distributive,
                        free,
                        vector,
-                       groups,
-                       edit-distance-vector
+                       groups
 
 
 common test-deps
@@ -63,5 +62,6 @@ test-suite zorja-test
                        Subtests.PatchGen,
                        Subtests.Primitives,
                        Subtests.ListX,
-                       Subtests.ZJIntMap
+                       Subtests.ZJIntMap,
+                       Subtests.Cofree
                       
