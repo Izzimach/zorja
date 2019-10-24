@@ -23,6 +23,7 @@ module Zorja.Patchable (
     UnPatchDelta,
     SelfDelta,
     FunctorDelta,
+    UnFunctorDelta,
     SelfPatchable(..),
     patchGeneric, 
     changesGeneric
@@ -50,8 +51,8 @@ type family UnPatchDelta da = a | a -> da
 -- | Certain types have a functor relationship to their delta, so that
 -- @PatchDelta a@ can be expressed as @f a@ where @f@ is a functor.
 
---type family FunctorDelta (f :: Type -> Type) = (a :: Type -> Type) | a -> f
-type family FunctorDelta (f :: Type -> Type) = (a :: Type -> Type) | a -> f
+type family FunctorDelta (f :: Type -> Type) = (df :: Type -> Type) | df -> f
+type family UnFunctorDelta (df :: Type -> Type) = (f :: Type -> Type) | f -> df
 
 
 -- | unit is it's own delta

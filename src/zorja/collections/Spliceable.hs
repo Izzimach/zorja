@@ -29,7 +29,6 @@ import Data.Proxy
 import qualified Data.Text as T
 
 import qualified Data.Vector as V
-import qualified Data.Vector.Distance as VD
 
 --
 -- | a splice action has a (start,end) range and the new value

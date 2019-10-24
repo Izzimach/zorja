@@ -90,20 +90,20 @@ testListHylo :: FunctorDExpr ReplaceOnly (Sum Int)
 testListHylo = hylo mergeListXFDE coalgListXFDE testListFDE
 
 
-testTreez :: CofD (ZJItemMap ReplaceOnly) ReplaceOnly (Sum Int)
+testTreez :: CofD (ZJItemMap FNotWrapped) ReplaceOnly (Sum Int)
 testTreez = (ReplaceOnly 3)
                 :<<
                 zjItemMapFromList [
-                    ReplaceOnly $ (ReplaceOnly (Sum 4)) :<< zjItemMapFromList [], 
-                    ReplaceOnly $ (ReplaceOnly (Sum 5)) :<< zjItemMapFromList []
+                    FNotWrapped $ (ReplaceOnly (Sum 4)) :<< zjItemMapFromList [], 
+                    FNotWrapped $ (ReplaceOnly (Sum 5)) :<< zjItemMapFromList []
                 ]
 
-testTreezD :: CofDD (ZJItemMap ReplaceOnly) ReplaceOnly (Sum Int)
+testTreezD :: CofDD (ZJItemMap FNotWrapped) ReplaceOnly (Sum Int)
 testTreezD = (Replacing Nothing)
                  :<#
                  zjItemMapDFromList [] []
 
-testTreeFDE :: FunctorDExpr (CofD (ZJItemMap ReplaceOnly) ReplaceOnly) (Sum Int)
+testTreeFDE :: FunctorDExpr (CofD (ZJItemMap FNotWrapped) ReplaceOnly) (Sum Int)
 testTreeFDE = FDE testTreez testTreezD
 
 

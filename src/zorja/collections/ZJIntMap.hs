@@ -98,8 +98,8 @@ instance (Show (f a), Show (FunctorDelta f a)) => Show (ZJPatch f a) where
     show (ZJDelete) = "ZJDelete"
     show (ZJDelta da) = "ZJDelta " ++ show da
 
-instance (FDEFunctor f) => Functor (ZJPatch f) where
-    fmap f (ZJDelta da) = ZJDelta $ fmapFD f da
+instance (Functor f, Functor (FunctorDelta f), FDEFunctor f) => Functor (ZJPatch f) where
+    fmap f (ZJDelta da) = ZJDelta $ fmap f da
     fmap f (ZJAdd a) = ZJAdd (fmap f a)
     fmap _ ZJDelete  = ZJDelete
     
@@ -108,7 +108,7 @@ type instance (FunctorDelta (ZJItem f)) = ZJPatch f
 
 instance (FDEFunctor f,
           FDECompatible f,
-          FDEConstraint f a, 
+          FDEConvertible f a, 
           Patchable (f a),
           PatchInstance (FunctorDelta f a))
             => PatchInstance (ZJPatch f a) where
@@ -123,7 +123,7 @@ instance (FDEFunctor f,
 
 instance (FDEFunctor f,
           FDECompatible f,
-          FDEConstraint f a,
+          FDEConvertible f a,
           PatchInstance (FunctorDelta f a),
           Patchable (f a))
             => Patchable (ZJItem f a) where
@@ -140,7 +140,7 @@ instance (FDEFunctor f,
 instance (FDEFunctor f) => FDECompatible (ZJItem f) where
     type FDEConstraint (ZJItem f) a = 
         (FDECompatible (ZJItem f),
-         FDEConstraint f a,
+         FDEConvertible f a,
          Patchable (f a),
          PatchInstance (FunctorDelta f a))
 
@@ -150,10 +150,8 @@ instance (FDEFunctor f) => FDECompatible (ZJItem f) where
     toFD z = z
     fromFD z = z
 
-instance (FDEFunctor f) => FDEFunctor (ZJItem f) where
+instance (Functor f, Functor (FunctorDelta f), FDEFunctor f) => FDEFunctor (ZJItem f) where
     fmapFDE f (FDE a da) = FDE (fmap f a) (fmap f da)
-
-    fmapFD f da = fmap f da
 
 instance (FDEFunctor f, FDEDistributive f) => FDEDistributive (ZJItem f) where
     distributeFDE (ZJEmpty)  = FDE ZJEmpty ZJDelete
@@ -209,7 +207,7 @@ instance (Eq (ZJPatch f a), PatchInstance (FunctorDelta f a)) => Eq (ZJItemMapD 
 instance (Show (ZJPatch f a)) => Show (ZJItemMapD f a) where
     show (ZJIMD a) = "(ZJIMD " ++ show a ++ ")"
 
-instance (FDEFunctor f) => Functor (ZJItemMapD f) where
+instance (Functor f, Functor (FunctorDelta f), FDEFunctor f) => Functor (ZJItemMapD f) where
     fmap f (ZJIMD vs) = ZJIMD $ fmap (fmap f) vs
 
 
@@ -218,7 +216,7 @@ type instance PatchDelta (ZJItemMap f a) = ZJItemMapD f a
 type instance FunctorDelta (ZJItemMap f) = ZJItemMapD f
 
 instance (FDEFunctor f,
-          FDEConstraint f a,
+          FDEConvertible f a,
           Patchable (f a),
           PatchInstance (FunctorDelta f a),
           PatchInstance (ZJItemMapD f a)) 
@@ -253,7 +251,7 @@ instance (FDEFunctor f,
                                            ZJData y -> Just (ZJAdd y)) x'
 
 instance (FDEFunctor f, 
-          FDEConstraint f a,
+          FDEConvertible f a,
           Patchable (f a),
           PatchInstance (FunctorDelta f a)) => PatchInstance (ZJItemMapD f a) where
     mergepatches (ZJIMD da1) (ZJIMD da2) = ZJIMD (M.unionWith mergepatches da1 da2)
@@ -261,7 +259,7 @@ instance (FDEFunctor f,
     nopatch = ZJIMD M.empty
 
 instance (FDEFunctor f) => FDECompatible (ZJItemMap f) where
-    type FDEConstraint (ZJItemMap f) a = (FDEConstraint f a,
+    type FDEConstraint (ZJItemMap f) a = (FDEConvertible f a,
                                           FDEFunctor f,
                                           Patchable (f a),
                                           PatchInstance (FunctorDelta f a))
@@ -273,9 +271,8 @@ instance (FDEFunctor f) => FDECompatible (ZJItemMap f) where
     toFD z = z
     fromFD z = z
 
-instance (FDEFunctor f) => FDEFunctor (ZJItemMap f) where
-    fmapFD f (ZJIMD vs) = ZJIMD $ fmap (fmap f) vs
-    fmapFDE f (FDE v dv) = FDE (fmap f v) (fmapFD f dv)
+instance (Functor f, Functor (FunctorDelta f), FDEFunctor f) => FDEFunctor (ZJItemMap f) where
+    fmapFDE f (FDE v dv) = FDE (fmap f v) (fmap f dv)
 
 instance (FDEFunctor f, FDEDistributive f) => FDEDistributive (ZJItemMap f) where
     --distributeFDE :: (FDEConstraint (ZJItemMap f) (fa a)) => ZJItemMap f (FunctorDExpr fa a) -> FunctorDExpr (ZJItemMap f (fa a))
@@ -294,6 +291,12 @@ instance (FDEFunctor f, FDETraversable f) => FDETraversable (ZJItemMap f) where
             onlyValues vs = M.map (\x -> sequenceFDE (FDE x nopatch)) vs
             -- no value implies it starts ZJEmpty
             onlyDeltas dvs = M.map (\x -> sequenceFDE (FDE ZJEmpty x)) dvs
+
+instance (Foldable f) => Foldable (ZJItemMap f) where
+    foldMap f (ZJIM a) = foldMap f' a
+        where
+            f' (ZJData a) = foldMap f a
+            f' (ZJEmpty)  = mempty
 
 zjItemMapFromList :: [f a] -> ZJItemMap f a
 zjItemMapFromList l = ZJIM $ M.fromList $ zip [1..] (fmap ZJData l)

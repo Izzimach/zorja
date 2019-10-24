@@ -71,31 +71,31 @@ type instance (PatchDelta (ListX f a)) = (ListX (FunctorDelta f) a)
 type instance FunctorDelta (ListX f) = ListX (FunctorDelta f)
 
 instance (Functor f) => FDECompatible (ListX f) where
-    type FDEConstraint (ListX f) a = (FDECompatible f, FDEConstraint f a, Patchable (f a), PatchInstance (ListX (FunctorDelta f) a))
+    type FDEConstraint (ListX f) a = (FDECompatible f, FDEConvertible f a, Patchable (f a), PatchInstance (ListX (FunctorDelta f) a))
     toFDE z = let (v,dv) = zdEval z
               in FDE v dv
     fromFDE (FDE v dv) = ZDV v dv
-    --toFD (ListX a) = ListX a
-    --fromFD (ListX a) = ListX a
+    toFD (ListX a) = ListX a
+    fromFD (ListX a) = ListX a
 
-{-instance (FDEDistributive f) => FDEDistributive (ListX f) where
-    --distributeFDE :: (FDEConstraint (ListX f) a) => ListX f (FunctorDExpr fa a) -> FunctorDExpr (ListX f) (fa a)
-    distributeFDE (ListX fdes) = FDE (ListX (fmap getA fdes')) (ListX (fmap getDA fdes'))
+instance (Functor f, FDEDistributive f) => FDEDistributive (ListX f) where
+    --distributeFDE :: (FDEConstraint (ListX f) (fa a)) => (ListX f) (FunctorDExpr fa a) -> FunctorDExpr (ListX f) (fa a)
+     distributeFDE (ListX fdes) = FDE (ListX $ fmap getA fdes') (ListX $ fmap getDA fdes')
         where
             fdes' = fmap distributeFDE fdes
             getA (FDE a _) = a
             getDA (FDE _ da) = da
 
-instance (FDETraversable f) => FDETraversable (ListX f) where
+instance (Functor f, FDETraversable f) => FDETraversable (ListX f) where
     --sequenceFDE :: (FDEConstraint (ListX f) (g a)) => FunctorDExpr (ListX f) (g a) -> ListX f (FunctorDExpr g a)
     sequenceFDE (FDE (ListX as) (ListX das)) = ListX $ fmap sequenceFDE $ zipWith FDE as das
--}
+
 
 instance (Functor f, Functor (FunctorDelta f)) => FDEFunctor (ListX f) where
-    fmapFDE f (FDE a da) = FDE (fmap f a) (fmapFD f da)
-    fmapFD f (ListX fa) = ListX (fmap (fmap f) fa)
+    fmapFDE f (FDE a da) = FDE (fmap f a) (fmap f da)
+    --fmapFD f (ListX fa) = ListX (fmap (fmap f) fa)
 
-instance (FDECompatible f, FDEConstraint f a, PatchInstance (ListX (FunctorDelta f) a), Patchable (f a)) 
+instance (FDECompatible f, FDEConvertible f a, PatchInstance (ListX (FunctorDelta f) a), Patchable (f a)) 
     => Patchable (ListX f a) where
     patch (ListX a) (ListX da) = ListX $ zipWith fpatch a da
         where
