@@ -53,13 +53,7 @@ gen_CofDTree fga fgb =
             genFDelta = \(a :<< db) ->
                 let da = dga a
                 in
-                    Gen.recursive Gen.choice
-                    [
-                        (:<#) <$> da <*> mempty
-                    ]
-                    [
-                        (:<#) <$> da <*> (gen_DeltaBranches db)
-                    ]
+                    (:<#) <$> da <*> (gen_DeltaBranches db)
         }
 
 

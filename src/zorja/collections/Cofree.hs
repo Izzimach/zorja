@@ -32,12 +32,10 @@ import Zorja.ZHOAS
 import Zorja.FunctorDExpr
 import Zorja.Collections.ListX
 
---
--- | A version of 'Cofree' that can be used with
---   'FunctorDelta' and 'FunctorDExpr'
-
+-- | A version of 'Cofree' that can be used with 'FunctorDExpr'
 data CofD fb fa a = (fa a) :<< (fb (CofD fb fa) a)
 
+-- | The 'ILCDelta' of 'CofD'
 data CofDD fb fa a = (FunctorDelta fa a) :<# (FunctorDelta (fb (CofD fb fa)) a)
 
 instance (Eq a, Eq (fa a), Eq (fb (CofD fb fa) a)) => Eq (CofD fb fa a) where
@@ -47,13 +45,15 @@ instance (Show (fa a), Show (fb (CofD fb fa) a)) => Show (CofD fb fa a) where
     show (x :<< xs) = "(CofD " ++ show x ++ " :<< " ++ show xs ++ ")"
     
 instance (Show (FunctorDelta fa a), Show (FunctorDelta (fb (CofD fb fa)) a)) => Show (CofDD fb fa a) where
-    show (x :<# xs) = "(CofDD " ++ show x ++ " :<< " ++ show xs ++ ")"
+    show (x :<# xs) = "(CofDD " ++ show x ++ " :<# " ++ show xs ++ ")"
         
 type instance PatchDelta (CofD fb fa a) = CofDD fb fa a --CofD fb (FunctorDelta fa) a
 type instance FunctorDelta (CofD fb fa) = CofDD fb fa --CofD fb (FunctorDelta fa)
 
+-- | Projected version of 'CofD'
 data CofDF fb fa a x = (fa a) :<= (fb fa x)
 
+-- | Projected vesrsion of 'CofDDF'
 data CofDDF fb fa a x = (FunctorDelta fa a) :<=# (FunctorDelta (fb fa) x)
 
 type instance PatchDelta (CofDF fb fa a x) = CofDDF fb fa a x --CofDF fb (FunctorDelta fa) a x

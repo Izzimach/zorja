@@ -3,120 +3,162 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Zorja.FunctorDExpr where
 
 import Data.Distributive
-import Data.Kind (Type, Constraint)
+import Data.Kind (Type)
+import Data.Proxy
+
+import Fcf.Core
 
 import Zorja.Patchable
 import Zorja.ZHOAS
     
 
--- |'FunctorDExpr' is a 'ZDExpr' where both 'a' and 'da' can be expressed as
--- functors. You can switch between the two using 'toFDE' and 'fromFDE'
+--
+-- * Deferred Functors
+--
+-- $deferredFunctors
+--
+-- When working with 'ILCDelta' values the typechecker needs to automatically
+-- derive deltas of possibly complicated and recursive functors. To
+-- avoid madness in figuring out types here I take the complete type @d a@ and
+-- separate it into the deferred functor @d@ applied to a payload @a@.
+--
+-- Given some kind @d@ and payload type @a@ the final type is
+--  @Eval (x d a)@ where @x@ is either 'ReifyFunctor' or 'ReifyFunctorD' depending
+-- on whether you want a functor or it's delta.
+--
+-- To use this, define an empty data type
+--
+-- > data X :: DeferredFunctor k)
+--
+-- and associated functors @FX@ and @FXD@ which are the functor and it's delta.
+-- that are associated with @X@. Then write two type instances to 'compute'
+-- @FX@ and @FXD@ from @X@:
+--
+-- > type instance Eval (ReifyFunctor  X a) = FX a
+-- > type instance Eval (ReifyFunctorD X a) = FXD a
+--
+-- Look at 'NoWrap' or 'ListX' as an example.
 
-data FunctorDExpr f a = FDE (f a) (FunctorDelta f a)
+-- | This is equivalent to 'Fcf.Exp'. The 'DeferredFunctor' is a datakind which
+-- describes a 'Functor' @d@ that has not yet been applied to its "payload" @a@.
+-- The application of the functor to its payload happens when 'Eval'-ing
+-- via 'ReifyFunctor' or 'ReifyFunctorD'. In this case a single datakind is used
+-- to derive both a functor (using 'ReifyFunctor') and that functors 'ILCDelta'
+-- (using 'ReifyFunctorD')
+type DeferredFunctor k = k -> Type
 
-instance (Functor f, Functor (FunctorDelta f)) => Functor (FunctorDExpr f) where
-    fmap f (FDE fa dfa) = FDE (fmap f fa) (fmap f dfa)
+-- | Given some 'DeferredFunctor' and a target payload, 'Eval'-ing this will
+-- produce the type @(f1 a)@ where the Functor @f1@ is associated with the 
+-- datakind @d@
+data ReifyFunctor  (d :: DeferredFunctor k) a :: Exp Type
 
-instance (Foldable f, Foldable (FunctorDelta f)) => Foldable (FunctorDExpr f) where
-    foldMap f (FDE fa dfa) = (foldMap f fa) <> (foldMap f dfa)
+-- | Given some 'DeferredFunctor' and a target payload, 'Eval'-ing this will
+-- produce the type @(f2 a)@  where the Functor @f2@ is associated with the
+-- datakind @d@ and @(f2 a)@ is the 'ILCDelta' of @(f1 a)@
+data ReifyFunctorD (d :: DeferredFunctor k) a :: Exp Type
 
-instance (Distributive f, Distributive (FunctorDelta f)) => Distributive (FunctorDExpr f) where
-    distribute xs = FDE (collect getA xs) (collect getDA xs)
+-- | This typeclass 'ReifyFmap' indicates that for a given 'DeferredFunctor' @d@, there
+-- exist related 'Functor' instances derived using 'ReifyFunctor' and 'ReifyFunctorD'
+-- version, which allows us to 'fmap' a function @f@ over both a value and its 'ILCDelta'
+class ReifyFmap (d :: DeferredFunctor k) where
+    rfmap :: Proxy d -> (a -> b) -> (Eval (ReifyFunctor d a)) -> (Eval (ReifyFunctor d b))
+    rfdmap :: Proxy d -> (a -> b) -> (Eval (ReifyFunctorD d a)) -> (Eval (ReifyFunctorD d b))
+
+
+
+-- The purpose of @RFType@ and @RFTypeD@ are to carry around
+-- the functor as a packaged-up type so that it can be used in computing
+-- related/derived data types.
+-- the underlaying data value is of the form (Eval (ReifyFunctor d a))
+
+-- | A newtype wrapper around `Eval (ReifyFunctor d a))'
+newtype RFType d a = RFT { unRFT :: (Eval (ReifyFunctor d a)) }
+
+-- | A newtype wrapper around 'Eval (ReifyFunctorD d a))'
+newtype RFTypeD d a = RFTD { unRFTD :: (Eval (ReifyFunctorD d a)) }
+
+instance (Show (Eval (ReifyFunctor d a))) => Show (RFType d a) where
+    show (RFT x) = "ReifiedFunctor: " ++ show x
+instance (Show (Eval (ReifyFunctorD d a))) => Show (RFTypeD d a) where
+    show (RFTD x) = "ReifiedFunctorD: " ++ show x
+    
+type instance ILCDelta (RFType d a) = RFTypeD d a
+
+instance (ReifyFmap d) => Functor (RFType d) where
+    fmap f (RFT a) = RFT $ rfmap (Proxy @d) f a
+
+instance (ReifyFmap d) => Functor (RFTypeD d) where
+    fmap f (RFTD a) = RFTD $ rfdmap (Proxy @d) f a
+
+
+
+
+
+-- |'ZFExpr' is a 'ZDExpr' where both 'a' and 'da' can be expressed as
+-- functors.
+
+
+-- | 'ZFExpr', a 'ZDExpr' where both the value @x@ and the delta @dx@ are
+--  functors of @a@, for example:
+--  - @x :: f1 a@
+--  - @dx :: f2 a@
+-- where @f1@ and @f2@ are both functors. This allows 'ZFExpr' to be a 'Functor'
+-- so it can be used in (for example) catamorphisms.
+-- To use this your base type @a@ has to be an 'RFType' so the typechecker
+-- can correctly figure out the 'ILCDelta' of computed and 'fmap' related types.
+
+data ZFExpr d a = ZFE (RFType d a) (RFTypeD d a)
+
+toZFExpr :: ZDExpr (RFType d a) -> ZFExpr d a
+toZFExpr (ZDV a da) = ZFE a da
+
+fromZFExpr :: (Patchable (RFType d a)) => ZFExpr d a -> ZDExpr (RFType d a)
+fromZFExpr (ZFE fa fda) = ZDV fa fda
+
+instance (Show (RFType d a), Show (RFTypeD d a)) => Show (ZFExpr d a) where
+    show (ZFE a da) = "ZFExpr: " ++ show a ++ " / " ++ show da
+
+instance (ReifyFmap d) => Functor (ZFExpr d) where
+    fmap f (ZFE (RFT x) (RFTD xd)) = ZFE (RFT $ rfmap (Proxy @d) f x) (RFTD $ rfdmap (Proxy @d) f xd)
+
+
+instance (ReifyFmap d, Distributive (RFType d), Distributive (RFTypeD d)) 
+    => Distributive (ZFExpr d) where
+    distribute xs = ZFE (collect getA xs) (collect getDA xs)
         where
-            getA (FDE a _) = a
-            getDA (FDE _ b) = b
+            getA (ZFE a _) = a
+            getDA (ZFE _ b) = b
 
-instance (Traversable f, Traversable (FunctorDelta f)) => Traversable (FunctorDExpr f) where
-    traverse f (FDE fa dfa) = FDE <$> (traverse f fa) <*> (traverse f dfa)
+instance (Foldable (RFType d), Foldable (RFTypeD d))
+    => Foldable (ZFExpr d) where
+    foldMap f (ZFE a da) = (foldMap f a) <> (foldMap f da)
 
--- | 'FDEConvertible' indicates that for a functor type 'f' the types
---  'PatchDelta' and 'FunctorDelta' are equivalent. Thus @ZDExpr (f a)@ can
---  be converted to @FunctorDExpr f a@
-type FDEConvertible f a = (FDEConstraint f a, PatchDelta (f a) ~ FunctorDelta f a)
-
--- |'FDEConvertible' is for 'Functor's (and their associated 'FunctorDelta')
--- that can be converted between 'ZDExpr' 'FunctorDExpr'
-
-class FDECompatible (f :: Type -> Type) where
-    type FDEConstraint f a :: Constraint
-
-    toFDE   :: (FDEConvertible f a) => ZDExpr (f a) -> FunctorDExpr f a
-    fromFDE :: (FDEConvertible f a) => FunctorDExpr f a -> ZDExpr (f a)
-    toFD   :: (FDEConvertible f a) => PatchDelta (f a) -> FunctorDelta f a
-    fromFD :: (FDEConvertible f a) => FunctorDelta f a -> PatchDelta (f a)
-
-
--- | A 'FDFunctor' allows you to take a function normally used to 'fmap'
---  on a functor 'fd' and instead apply it to a
--- 'FunctorDelta fd' or 'FunctorDExpr fd'
-class (FDECompatible f) => FDEFunctor f where
-    fmapFDE :: (FDEConvertible f a, FDEConvertible f b) => (a -> b) -> FunctorDExpr f a -> FunctorDExpr f b
-
-    
--- | 'FDEDistributive' allows you to distribute a 'Functor'-like structure
--- over 'FunctorDExpr'
-class (FDECompatible fd) => FDEDistributive (fd :: Type -> Type) where
-    distributeFDE :: (FDEConvertible fd (fa a)) => fd (FunctorDExpr fa a) -> FunctorDExpr fd (fa a)
-
--- | 'FDETraversable' allows you to run  'sequenceA'
--- over a 'FunctorDExpr'
-class (FDECompatible fd) => FDETraversable (fd) where
-    sequenceFDE :: (FDEConvertible fd (fa a)) => FunctorDExpr fd (fa a) -> fd (FunctorDExpr fa a)
+instance (ReifyFmap d, Traversable (RFType d), Traversable (RFTypeD d))
+    => Traversable (ZFExpr d) where
+    traverse f (ZFE fa dfa) = ZFE <$> (traverse f fa) <*> (traverse f dfa)
 
 
 
--- | 'FNotWrapped' is a wrapper that just passes through 'fmap' and
---  'patch' operations. It is basically 'Identity' for 'FunctorDExpr'
-newtype FNotWrapped a = FNotWrapped a
-newtype FNotWrappedD a = FNotWrappedD (PatchDelta a)
+-- | NoWrap is basically "no-functor". Note that to use this with FDExpr's,
+-- the inner type has to be its own delta.
+data NoWrap :: DeferredFunctor k
 
-instance Functor FNotWrapped where
-    fmap f (FNotWrapped a) = FNotWrapped (f a)
+type instance Eval (ReifyFunctor  NoWrap a) = a
+type instance Eval (ReifyFunctorD NoWrap a) = a
 
---instance Functor FNotWrappedD where
-    --fmap f (FNotWrappedD a) = FNotWrappedD (f a)
+instance ReifyFmap NoWrap where
+    rfmap _ f a = f a
+    rfdmap _ f da = f da
 
-instance Foldable FNotWrapped where
-    foldMap f (FNotWrapped a) = f a
-    
---instance Foldable FNotWrappedD where
-    --foldMap f (FNotWrappedD a) = f a
-        
-instance FDECompatible FNotWrapped where
-    type FDEConstraint FNotWrapped a = (Patchable (FNotWrapped a))
-
-    toFDE (ZDV a da) = FDE a da
-    fromFDE (FDE a da) = ZDV a da
-    fromFD (FNotWrappedD a) = FNotWrappedD a
-    toFD (FNotWrappedD a) = FNotWrappedD a
-
---instance FDEFunctor FNotWrapped where
-    --fmapFDE f (FDE a da) = FDE (fmap f a) (fmap f da)
-
-type instance FunctorDelta (FNotWrapped) = FNotWrappedD
-type instance PatchDelta (FNotWrapped a) = FNotWrappedD a
-
-instance (PatchInstance (PatchDelta a)) => PatchInstance (FNotWrappedD a) where
-    mergepatches (FNotWrappedD da) (FNotWrappedD da') = FNotWrappedD (mergepatches da da')
-    nopatch = FNotWrappedD nopatch
-
-instance (Patchable a) => Patchable (FNotWrapped a) where
-    patch (FNotWrapped a) (FNotWrappedD da) = FNotWrapped (patch a da)
-    changes (FNotWrapped a) (FNotWrapped a') = FNotWrappedD (changes a a')
-
-
---
--- Functions and typeclasses for FunctorDExpr
---
-
--- | Apply the patch stored in a FunctorDExpr
-fdeApplyPatch :: (FDEConvertible f a, FDECompatible f, Patchable (f a)) => FunctorDExpr f a -> (f a)
-fdeApplyPatch v = zdApplyPatch $ fromFDE v

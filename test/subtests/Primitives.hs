@@ -7,10 +7,28 @@ module Subtests.Primitives where
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 
+import Data.Functor.Identity
 
 import Zorja.Primitives
 
 import Subtests.PatchGen
+
+
+gen_Identity :: PatchableGen a -> PatchableGen (Identity a)
+gen_Identity (PatchableGen g dg) =
+    PatchableGen
+    {
+        genValue = fmap Identity g,
+        genDelta = \(Identity a) -> fmap IdentityD (dg a)
+    }
+
+gen_IdentityFDE :: FunctorDExprGen f a -> FunctorDExprGen Identity (f a)
+gen_IdentityFDE (FDEGen g dg) =
+    FDEGen
+    {
+        genFValue = fmap Identity g,
+        genFDelta = \(Identity a) -> fmap IdentityD (dg a)
+    }
 
 --
 -- | Generator for the ReplaceOnly primitive.  Given a value generator

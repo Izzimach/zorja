@@ -15,13 +15,9 @@ import Data.Kind
 
 import Zorja.Patchable
 
-import Data.Distributive
-import Control.Comonad
 
-
---
--- Code in here is used for expressing your function as
--- a DSL, specifically HOAS (Higher-Order Abstrac Syntax).
+-- |'ZHOAS' is used for expressing your function as
+-- a DSL, using HOAS (Higher-Order Abstrac Syntax).
 -- This HOAS function can then be interpreted as a simple
 -- function from a -> b. Alternately the DSL can be
 -- interpreted as a function (a -> b) along with the "derivative"
@@ -32,18 +28,13 @@ import Control.Comonad
 --    lambda-calculi by static differentiation."
 -- also [Elliott] "Compiling to Categories"
 -- and finally Phil Freeman's blog "Incrementally Improving the DOM"
---
-
 class ZHOAS rep where
     type ZOk rep a :: Constraint
     lam :: (ZOk rep a, ZOk rep b, ZOk rep (a -> b)) => (rep a -> rep b) -> rep (a -> b)
     app :: (ZOk rep a, ZOk rep b, ZOk rep (a -> b)) => rep (a -> b) -> rep a -> rep b
 
 
---
--- The type ZE lets you eval a ZHOAS expression as a simple value or function a -> b
---
-
+-- |The type ZE lets you eval a ZHOAS expression as a simple value or function a -> b
 newtype ZE a = ZE { unZE :: a }
 
 evalZE :: ZE a -> a
@@ -72,12 +63,12 @@ instance ZHOAS ZE where
 
 data ZDExpr a where
     ZDF :: (Patchable a, Patchable b) => (ZDExpr a -> ZDExpr b) -> ZDExpr (a -> b)
-    ZDV :: (Patchable a) => a -> PatchDelta a -> ZDExpr a
+    ZDV :: (Patchable a) => a -> ILCDelta a -> ZDExpr a
 
 zdValue :: (Patchable a) => ZDExpr a -> a
 zdValue zv = fst $ zdEval zv
 
-zdPatch :: (Patchable a) => ZDExpr a -> PatchDelta a
+zdPatch :: (Patchable a) => ZDExpr a -> ILCDelta a
 zdPatch zv = snd $ zdEval zv
 
 zdApplyPatch :: (Patchable a) => ZDExpr a -> a
@@ -85,9 +76,9 @@ zdApplyPatch zv = let (x,dx) = zdEval zv
                   in patch x dx
 
 
-zdEval :: forall a. (Patchable a, PatchInstance (PatchDelta a)) => ZDExpr a -> (a, PatchDelta a)
+zdEval :: forall a. (Patchable a) => ZDExpr a -> (a, ILCDelta a)
 zdEval (ZDF zf)   = (f,df)
-    where f = \a -> zdValue $ zf (ZDV a nopatch)
+    where f = \a -> zdValue $ zf (ZDV a noPatch)
           df = \a -> \da -> zdPatch $ zf (ZDV a da)
 zdEval (ZDV a da) = (a, da)
 
@@ -98,8 +89,8 @@ instance ZHOAS ZDExpr where
     app (ZDV f df) val = let (a,da) = zdEval val
                          in  ZDV (f a) (df a da)
     
-instance (Patchable a, Show a, Show (PatchDelta a)) => Show (ZDExpr a) where
-    show (ZDF zf) = "(ZDExpr Function)"
+instance (Patchable a, Show a, Show (ILCDelta a)) => Show (ZDExpr a) where
+    show (ZDF _zf) = "(ZDExpr Function)"
     show (ZDV a da) = "(ZDExpr Value: " ++ show a ++ "," ++ show da ++ ")"
 
 -- distribution for ZDExpr of SelfDelta and FunctorDelta data
@@ -146,7 +137,7 @@ instance (Functor f) => Comonad (FunctorDeltaExpr f) where
 --
 data SDExpr a where
     SDF :: (SDExpr a -> SDExpr b) -> SDExpr (a -> b)
-    SDV :: a -> PatchDelta a -> SDExpr a
+    SDV :: a -> ILCDelta a -> SDExpr a
     SDAdd :: a -> SDExpr a
     SDDelete :: a -> SDExpr a
 
@@ -214,13 +205,13 @@ instance Monoid (BoolChange) where
     mappend = (<>)
 
 instance PatchInstance BoolChange where
-    mergepatches a b = a <> b
-    nopatch = mempty
+    a <^< b = a <> b
+    noPatch = mempty
 
 
 newtype ZBool = ZBool { unZBool :: Bool } deriving (Eq)
 
-type instance (PatchDelta ZBool) = BoolChange
+type instance (ILCDelta ZBool) = BoolChange
 
 instance Patchable ZBool where
     patch a da = case da of
@@ -254,7 +245,7 @@ zIf =
                                         (x2,dx2) = zdEval z2
                                         patchedchanges = changes (patch x1 dx1) (patch x2 dx2)
                                     in
-                                        ZDV x1 (mergepatches dx1 patchedchanges)
+                                        ZDV x1 (dx1 <^< patchedchanges)
                             in
                                 if (unZBool zb)
                                 then -- true to false
@@ -281,24 +272,24 @@ zIf =
 
 newtype DFunc a b = DF { unDF :: a -> b }
 
-type instance PatchDelta (DFunc a b) = DFunc a ((PatchDelta a) -> (PatchDelta b))
+type instance ILCDelta (DFunc a b) = DFunc a ((ILCDelta a) -> (ILCDelta b))
 
 data ZXExpr a where
-    ZXFunc :: (DFunc a (b, PatchDelta a -> PatchDelta b)) -> ZXExpr (a -> b)
-    ZXVal :: a -> PatchDelta a -> ZXExpr a
+    ZXFunc :: (DFunc a (b, ILCDelta a -> ILCDelta b)) -> ZXExpr (a -> b)
+    ZXVal :: a -> ILCDelta a -> ZXExpr a
 
-zxposition :: (Patchable a) => ZXExpr a -> a
+zxposition :: ZXExpr a -> a
 zxposition (ZXVal a _da) = a
 zxposition (ZXFunc df) = fst . unDF df
 
-zxvelocity :: (Patchable a) => ZXExpr a -> PatchDelta a
+zxvelocity :: ZXExpr a -> ILCDelta a
 zxvelocity (ZXVal _a da) = da
 zxvelocity (ZXFunc df) = snd . unDF df
 
 instance ZHOAS ZXExpr where
     type ZOk ZXExpr a = Patchable a
     -- DFunc here is a -> (b, da -> db)
-    lam zf  = ZXFunc $ DF $ \a -> let b = zxposition (zf (ZXVal a nopatch))
+    lam zf  = ZXFunc $ DF $ \a -> let b = zxposition (zf (ZXVal a noPatch))
                                       dab = \da -> let aa = ZXVal a da
                                                        bb = zf aa
                                                    in zxvelocity bb

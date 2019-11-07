@@ -30,7 +30,8 @@ common deps
                        distributive,
                        free,
                        vector,
-                       groups
+                       groups,
+                       first-class-families
 
 
 common test-deps

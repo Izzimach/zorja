@@ -17,13 +17,13 @@ module Zorja.Patchable (
     patch,
     changes, 
     PatchInstance,
-    mergepatches,
-    nopatch,
-    PatchDelta,
-    UnPatchDelta,
+    mergePatches,
+    (<^<),
+    noPatch,
+    ILCDelta,
     SelfDelta,
-    FunctorDelta,
-    UnFunctorDelta,
+    valueToDelta,
+    deltaToValue,
     SelfPatchable(..),
     patchGeneric, 
     changesGeneric
@@ -32,84 +32,71 @@ module Zorja.Patchable (
 
 import GHC.Generics
 
-import Data.Kind
-import Data.Semigroup
 import Data.Group
 
 import Control.Applicative
 
--- | For a type @a@ there is a delta @PatchDelta a@ that describes how to
---   make changes to @a@ and produce a new value :@patch a (PatchDelta a) = a'@
---
---   We make @PatchDelta@ injective which is a little inconvenient.  It means
---   no two types can have the same type for @PatchDelta@ but it also gives
---   the typechecker more hints to properly digest complex types that use @PatchDelta@.
+-- | For a type @a@ there is a delta @ILCDelta a@ that describes how to
+--  make changes to @a@ and produce a new value: @patch a (ILCDelta a) = a'@
+--  ILC in this case is "Incremental Lambda Calculus"
+type family ILCDelta a
 
-type family PatchDelta a = da | da -> a
-type family UnPatchDelta da = a | a -> da
+-- | unit is it's own ILC delta
+type instance (ILCDelta ()) = ()
 
--- | Certain types have a functor relationship to their delta, so that
--- @PatchDelta a@ can be expressed as @f a@ where @f@ is a functor.
-
-type family FunctorDelta (f :: Type -> Type) = (df :: Type -> Type) | df -> f
-type family UnFunctorDelta (df :: Type -> Type) = (f :: Type -> Type) | f -> df
-
-
--- | unit is it's own delta
-type instance (PatchDelta ()) = ()
-type instance (UnPatchDelta ()) = ()
-
--- | @Monoid@ for combining PatchDelta values.
+-- | Class for combining 'ILCDelta' values.
 -- Two patches can be combined. If we have two patches @da@ and @da'@ then
 -- they can be combined into one patch @da <^< da'@, such that:
 -- @patch a (da <^< da') = patch (patch a da) da'@.
--- This is distinct from @Monoid@ since merging patches might be different
--- than @mappend@
+-- This is distinct from 'Monoid' since merging patches might be different
+-- than 'mappend'
 --
 class PatchInstance a where
-    mergepatches :: a -> a -> a
-    nopatch :: a
+    (<^<) :: a -> a -> a
+    noPatch :: a
 
+mergePatches :: (PatchInstance a) => a -> a -> a
+mergePatches = (<^<)
 
-
--- | A typeclass for data that can be diff'd and patched.
---  The associated type @PatchDelta a@ must be a Monoid since it
+-- |'Patchable' is a typeclass for data that can be diff'd and patched.
+--  The associated type @ILCDelta a@ must be a 'PatchInstance' since it
 --  can be combined with other changes to generate a "combined patch"
---  and must support an empty patch. Note that this monoid combines small
---  patches into a single bigger patch, which may be different behavior than
---  some default Monoid instance for that type. You may have to use a @newtype@
+--  and must support an empty patch. Note that even though 'PatchInstance'
+--  is a 'Monoid' that combines small
+--  patches into a single bigger patch, it may have different behavior than
+--  some default 'Monoid' instance for that type. You may have to use a newtype
 --  wrapper to distinguish the two.
 -- 
 --  @patch x (changes x x') = x'@
-
-class (PatchInstance (PatchDelta a)) => Patchable a where
+class (PatchInstance (ILCDelta a)) => Patchable a where
   -- | @patch x dx@ applies the changes in @dx@ to @x@
-  patch :: a -> PatchDelta a -> a
-  -- | @changes x x'@ generates a @dx :: PatchDelta a@ that can convert @x@ into @x'@ using @patch@
-  changes ::  a -> a -> PatchDelta a
+  patch :: a -> ILCDelta a -> a
+  -- | @changes x x'@ generates a @dx :: ILCDelta a@ that can convert @x@ into @x'@ using @patch@
+  changes ::  a -> a -> ILCDelta a
+
+
 
 -- | Some data types are their own delta. We can mark this with a typeclass.
 --   See also @SelfPatchable@ which converts any @Group@ into a @SelfDelta@
-
 class (Patchable a) => SelfDelta a where
-  valueToDelta :: a -> PatchDelta a
-  deltaToValue :: PatchDelta a -> a
+  valueToDelta :: a -> ILCDelta a
+  deltaToValue :: ILCDelta a -> a
 
 
 --
 -- | Patchable instance for functions
 --
 
-type instance PatchDelta (a -> b) = a -> PatchDelta a -> PatchDelta b
+type instance ILCDelta (a -> b) = a -> ILCDelta a -> ILCDelta b
 
 instance (PatchInstance b) => PatchInstance (a -> b) where
-    mergepatches ev ev' = \a -> let a1 = ev  a
-                                    a2 = ev' a
-                                in (mergepatches a1 a2)
-    nopatch = \_ -> nopatch
+    ev <^< ev' = \a -> let a1 = ev  a
+                           a2 = ev' a
+                       in (a1 <^< a2)
+    noPatch = \_ -> noPatch
 
 instance (Patchable a, Patchable b) => Patchable (a -> b) where
-    patch f ev = \a -> patch (f a) (ev a nopatch)
+    patch f ev = \a -> patch (f a) (ev a noPatch)
     changes f1 f2 = \a -> \da ->
         --
         -- Incorporate both f' and delta-f:
@@ -140,11 +127,11 @@ instance (Patchable a, Patchable b) => Patchable (a -> b) where
 --   you want.
 --
 
-type instance PatchDelta (a,b) = (PatchDelta a, PatchDelta b)
+type instance ILCDelta (a,b) = (ILCDelta a, ILCDelta b)
 
 instance (PatchInstance a, PatchInstance b) => PatchInstance (a,b) where
-    mergepatches (da,db) (da',db') = (mergepatches da da', mergepatches db db')
-    nopatch = (nopatch, nopatch)
+    (da,db) <^< (da',db') = (da <^< da', db <^< db')
+    noPatch = (noPatch, noPatch)
 
 instance (Patchable a, Patchable b) => Patchable (a,b) where
     patch (a,b) (da,db) = (patch a da, patch b db)
@@ -166,7 +153,7 @@ instance (Patchable a, Patchable b) => Patchable (a,b) where
 data SelfPatchable a = SelfPatchable a deriving (Eq, Show)
 
 
-type instance PatchDelta (SelfPatchable a) = SelfPatchable a
+type instance ILCDelta (SelfPatchable a) = SelfPatchable a
 
 instance (Group a, PatchInstance a) => SelfDelta (SelfPatchable a) where
     valueToDelta a = a
@@ -194,8 +181,8 @@ instance (Num a) => Num (SelfPatchable a) where
     fromInteger n = SelfPatchable (fromInteger n)
 
 instance (PatchInstance a) => PatchInstance (SelfPatchable a) where
-    mergepatches (SelfPatchable a) (SelfPatchable b) = SelfPatchable (mergepatches a b)
-    nopatch = SelfPatchable nopatch
+    (SelfPatchable a) <^< (SelfPatchable b) = SelfPatchable (a <^< b)
+    noPatch = SelfPatchable noPatch
 
 instance (Group a, PatchInstance a) => Patchable (SelfPatchable a) where
     patch (SelfPatchable a) (SelfPatchable da) = SelfPatchable (a <> da)
@@ -211,10 +198,10 @@ class PatchG i o where
   patchG :: i p -> o p -> i p
   changesG :: i p -> i p -> o p
 
-instance (Patchable x, dx ~ PatchDelta x) => PatchG (K1 a x) (K1 a dx) where
-  patchG :: K1 a x p -> K1 a (PatchDelta x) p -> K1 a x p
+instance (Patchable x, dx ~ ILCDelta x) => PatchG (K1 a x) (K1 a dx) where
+  patchG :: K1 a x p -> K1 a (ILCDelta x) p -> K1 a x p
   patchG (K1 x) (K1 dx) = K1 $ patch x dx
-  changesG :: K1 a x p -> K1 a x p -> K1 a (PatchDelta x) p
+  changesG :: K1 a x p -> K1 a x p -> K1 a (ILCDelta x) p
   changesG (K1 x0) (K1 x1) = K1 $ changes x0 x1
   
 
@@ -227,7 +214,7 @@ instance (PatchG i o, PatchG i' o') => PatchG (i :*: i') (o :*: o') where
 -- or switching to a separate value (right choices)
 --
 -- this means the change type for (A | B) would be:
---   (A :+: B :+: (PatchDelta (A | B)))
+--   (A :+: B :+: (ILCDelta (A | B)))
 --
 
 instance (PatchG i o, PatchG i' o')
@@ -260,24 +247,24 @@ instance PatchG U1 U1 where
   changesG U1 U1 = U1
 
 --
--- PatchDelta for generics
+-- ILCDelta for generics
 --
 
 
 
 patchGeneric ::
   (Generic f,
-   Generic (PatchDelta f),
---    Monoid (PatchDelta f),
-   PatchG (Rep f) (Rep (PatchDelta f)))
-  => f -> (PatchDelta f) -> f
+   Generic (ILCDelta f),
+--    Monoid (ILCDelta f),
+   PatchG (Rep f) (Rep (ILCDelta f)))
+  => f -> (ILCDelta f) -> f
 patchGeneric a da = to $ patchG (from a) (from da)
 
 changesGeneric ::
   (Generic f,
-   Generic (PatchDelta f),
-   PatchG (Rep f) (Rep (PatchDelta f)))
-  => f -> f -> (PatchDelta f)
+   Generic (ILCDelta f),
+   PatchG (Rep f) (Rep (ILCDelta f)))
+  => f -> f -> (ILCDelta f)
 changesGeneric a b = to $ changesG (from a) (from b)  
   
 --  patch a da = to $ patchG (from a) (from da)

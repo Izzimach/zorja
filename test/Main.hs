@@ -61,6 +61,7 @@ prop_patchmerge =
         -- ListX
         subprop_patchmerge basic_ListXfloat
         subprop_patchmerge basic_ZJItemMapint
+        subprop_patchmerge patchgen_CofTreeint
 
 -- | patching 'a' with 'changes a b' should produce 'b'
 prop_patchchanges :: Property
@@ -70,6 +71,7 @@ prop_patchchanges =
         subprop_patchchanges basic_ZJItemMapint
         -- can't test ListX since it doesn't work on different-sized lists
         --subprop_patchchanges (fromFDEGen $ gen_ListX $ toFDEGen $ gen_ReplaceOnly floatgen)
+        subprop_patchchanges patchgen_CofTreeint
 
 
 

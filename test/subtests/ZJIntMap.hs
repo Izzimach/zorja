@@ -52,7 +52,7 @@ gen_ZJItemMap (FDEGen g dg) =
             --  - a value 'ZJData a' with a missing patch (equivalent to nopatch)
             --  - a value 'ZJEmpty'  with patch 'ZJAdd a'
             --  - a value 'ZJEmpty'  with a missing patch
-            --  - a missing value    with patch 'ZJAdd a' (missiong value is equivalent to 'ZJEmpty') 
+            --  - a missing value    with patch 'ZJAdd a' (missing value is equivalent to 'ZJEmpty') 
             --
             -- some values that are discarded:
             --  - a missing value with patch 'ZJDelete' /is discarded/
@@ -64,7 +64,7 @@ gen_ZJItemMap (FDEGen g dg) =
                 return $ ZJIMD x
     }
     where
-        indexgen = Gen.integral (Range.linear (-50) 50)
+        indexgen = Gen.integral (Range.constantFrom 0 (-50) 50)
                 
         -- for some value in the original map, generate an add, delete, or delta
         -- as appropriate
