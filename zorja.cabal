@@ -39,7 +39,6 @@ common test-deps
 
 library
   import: deps
-  --main-is:             Main.hs
   exposed-modules:     Zorja.Patchable,
                        Zorja.Primitives,
                        Zorja.ZHOAS,

@@ -55,6 +55,7 @@ class PatchInstance a where
     (<^<) :: a -> a -> a
     noPatch :: a
 
+-- | 'mergePatches' is a synonym for '(<^<)'
 mergePatches :: (PatchInstance a) => a -> a -> a
 mergePatches = (<^<)
 
@@ -141,7 +142,7 @@ instance (Patchable a, Patchable b) => Patchable (a,b) where
 --
 -- | If a is a group, we can generate a Patchable type where the 
 --   delta is the same type as the actual value.
---   Patches are performed using semigroup (<>).
+--   Patches are performed using semigroup '(<>)'.
 --   Works for some numbers (Integer) but for others you
 --   have the problem that some values are unrepresentable.  For instance,
 --   (changes a a') on float may produce a delta that is too small to

@@ -15,9 +15,17 @@
 
 module Zorja.Primitives 
     (
-        --IdentityD(..),
+        -- * Identity for deferred functors
+        FIdentity(..),
+        -- * A type where the delta simply replaces old values
+        --
+        -- $replaceOnly
         ReplaceOnly(..),
         Replacing(..),
+        ReplaceOnlyK,
+        -- * A number where the delta is of the same numeric type
+        --
+        -- $diffNum
         DiffNum(..)
     )
     where
@@ -29,7 +37,6 @@ import Data.Maybe
 import Fcf.Core
 
 import Zorja.Patchable
-import Zorja.ZHOAS
 import Zorja.FunctorDExpr
 
 -- | Deltas for Identity
@@ -46,7 +53,7 @@ instance Functor (FIdentity) where
 
 instance ReifyFmap IdentityK where
     rfmap _ f (FIdentity a) = FIdentity (f a)
-    rfdmap _ f (FIdentity a) = FIdentity (f a)
+    rfmapD _ f (FIdentity a) = FIdentity (f a)
     
 type instance ILCDelta (FIdentity a) = FIdentity a
 
@@ -55,9 +62,16 @@ instance (PatchInstance a) => PatchInstance (FIdentity a) where
     noPatch = FIdentity noPatch
 
 
+
+
+-- $replaceOnly
 --
--- ReplaceOnly and Replacing datatypes
---
+-- The types 'ReplaceOnly' and 'Replacing' make up a type
+-- where applying patches just replace the original value with a new value.
+-- The result of merging two patches if to just take the most recent value
+-- (the one on the right side of the (<^<) operator) just like @Option (Last a)@ would
+-- do.
+
 
 -- | ReplaceOnly is a 'Patchable' type that just replaces the
 --  previous value. Efficient for primitive types, but
@@ -75,16 +89,11 @@ newtype Replacing a = Replacing (Maybe a)
     deriving (Functor, Applicative) via Maybe
     deriving (Semigroup, Monoid) via (Maybe a)
 
-data ReplaceOnlyK :: DeferredFunctor k
-
-type instance Eval (ReifyFunctor ReplaceOnlyK a) = ReplaceOnly a
-type instance Eval (ReifyFunctorD ReplaceOnlyK a) = Replacing a
-
 type instance ILCDelta (ReplaceOnly a) = Replacing a
 
 instance ReifyFmap ReplaceOnlyK where
     rfmap _ f (ReplaceOnly a) = ReplaceOnly (f a)
-    rfdmap _ f (Replacing da) = Replacing   (fmap f da)
+    rfmapD _ f (Replacing da) = Replacing   (fmap f da)
 
 
 instance (Eq a) => Patchable (ReplaceOnly a) where
@@ -103,23 +112,36 @@ instance PatchInstance (Replacing a) where
         in Replacing c
     noPatch = Replacing Nothing
 
+-- | a kind to use 'ReplaceOnly' with deferred functors found in 'Zorja.FunctorDExpr'
+data ReplaceOnlyK :: DeferredFunctor k
+
+type instance Eval (ReifyFunctor ReplaceOnlyK a) = ReplaceOnly a
+type instance Eval (ReifyFunctorD ReplaceOnlyK a) = Replacing a
+
     
+
+
+
+
+
+-- $diffNum
 --
--- | Difference Num's use the numeric difference as a delta. Really only works
---   for unbounded integers 'Integer'. For other types the deltas might sometimes
---   be unrepresentable, so things like @patch a (changes a b) = b@ might
---   not hold.
+-- Difference Num's use the numeric difference as a delta. Really only works
+-- for unbounded integers 'Integer'. For other types the deltas might sometimes
+-- be unrepresentable, so things like @patch a (changes a b) = b@ might
+-- not hold.
+
+-- | Base type for a difference num. A 'DiffNum' is its own delta: @ILCDelta (DiffNum a) = DiffNum a@
 newtype DiffNum a = DNum (Sum a)
     deriving (Eq, Show, Num, Ord, Semigroup, Monoid) via (Sum a)
     deriving (Functor, Applicative) via Identity
 
 type instance ILCDelta (DiffNum a) = DiffNum a
 
-instance (Num a, Eq a) => Patchable (DiffNum a) where
+instance (Num a) => Patchable (DiffNum a) where
     patch a da = a + da
     changes a a' = a' - a
 
 instance (Num a) => PatchInstance (DiffNum a) where
     da <^< db = da + db
     noPatch = DNum mempty
-    

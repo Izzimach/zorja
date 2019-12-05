@@ -76,7 +76,7 @@ zdApplyPatch zv = let (x,dx) = zdEval zv
                   in patch x dx
 
 
-zdEval :: forall a. (Patchable a) => ZDExpr a -> (a, ILCDelta a)
+zdEval :: (Patchable a) => ZDExpr a -> (a, ILCDelta a)
 zdEval (ZDF zf)   = (f,df)
     where f = \a -> zdValue $ zf (ZDV a noPatch)
           df = \a -> \da -> zdPatch $ zf (ZDV a da)
@@ -92,8 +92,6 @@ instance ZHOAS ZDExpr where
 instance (Patchable a, Show a, Show (ILCDelta a)) => Show (ZDExpr a) where
     show (ZDF _zf) = "(ZDExpr Function)"
     show (ZDV a da) = "(ZDExpr Value: " ++ show a ++ "," ++ show da ++ ")"
-
--- distribution for ZDExpr of SelfDelta and FunctorDelta data
 
 data SelfDeltaExpr a = SDE a a
 instance Functor SelfDeltaExpr where
@@ -135,6 +133,7 @@ instance (Functor f) => Comonad (FunctorDeltaExpr f) where
 -- This allows us to use @Functor@ and @Foldable@ with data structures
 -- that add and remove elements.
 --
+{-
 data SDExpr a where
     SDF :: (SDExpr a -> SDExpr b) -> SDExpr (a -> b)
     SDV :: a -> ILCDelta a -> SDExpr a
@@ -155,6 +154,7 @@ instance ZHOAS SDExpr where
                       in SDAdd (f a)-}
     app (SDDelete f) x = undefined {-let (a,_) = zdEval $ fromSDExpr x
                          in SDDelete (f a)-}
+-}
 
 {-
 -- | Functions as SDExprs

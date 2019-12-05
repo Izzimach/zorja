@@ -32,12 +32,17 @@ import Control.Monad.State
 
 import Zorja.Patchable
 import Zorja.Primitives
-import Zorja.Collections.FAlgebra
+
+--import Zorja.Collections.FAlgebra
+
+import Fcf
+
 import Zorja.ZHOAS
 import Zorja.FunctorDExpr
 import Zorja.Collections.ListX
-import Zorja.Collections.ZJIntMap
-import Zorja.Collections.Cofree
+
+--import Zorja.Collections.ZJIntMap
+--import Zorja.Collections.Cofree
 
 --
 -- recursive deltas
@@ -68,29 +73,31 @@ zDownFixed = (fix zDownFixable)
 --
 
 
-testList :: ListX ReplaceOnly (Sum Int)
-testList = ListX [ReplaceOnly (Sum 3), ReplaceOnly (Sum 5)]
-
-testListD :: PatchDelta (ListX ReplaceOnly (Sum Int))
---testListD :: ListXD Replacing (ListX ReplaceOnly Int)
-testListD = ListX $ [
-                Replacing Nothing,
-                Replacing (Just (Sum (6::Int)))
+testList :: RFType (ListXK ReplaceOnlyK) Int
+testList = RFT $ ListX $ [
+               ReplaceOnly 3,
+               ReplaceOnly 5
             ]
 
-testListFDE :: FunctorDExpr (ListX ReplaceOnly) (Sum Int)
-testListFDE = FDE testList testListD
+testListD :: RFTypeD (ListXK ReplaceOnlyK) Int
+testListD = RFTD $ ListXD $ [
+                Replacing Nothing,
+                Replacing (Just 6)
+            ]
+
+testListFDE :: ZFExpr (ListXK ReplaceOnlyK) Int
+testListFDE = ZFE testList testListD
 
 
--- try a hylomorphism...
--- - starting with a FunctorDExpr (ListX ReplaceOnly) (Sum Int)
+-- | try a catamorphism...
+-- - starting with a @ZFExpr (ListXK ReplaceOnlyK) Int@
 -- - unfold into a ListX with coalListXFDE
 -- - then fold up with mergeListXFDE
-testListHylo :: FunctorDExpr ReplaceOnly (Sum Int)
-testListHylo = hylo mergeListXFDE coalgListXFDE testListFDE
+testListCata :: ZFExpr ReplaceOnly Int
+testListCata = undefined --cata _f testListFDE
 
 
-testTreez :: CofD (ZJItemMap FNotWrapped) ReplaceOnly (Sum Int)
+{-testTreez :: CofD (ZJItemMap FNotWrapped) ReplaceOnly (Sum Int)
 testTreez = (ReplaceOnly 3)
                 :<<
                 zjItemMapFromList [
@@ -107,6 +114,6 @@ testTreeFDE :: FunctorDExpr (CofD (ZJItemMap FNotWrapped) ReplaceOnly) (Sum Int)
 testTreeFDE = FDE testTreez testTreezD
 
 
-
+-}
 main :: IO ()
 main = return ()
