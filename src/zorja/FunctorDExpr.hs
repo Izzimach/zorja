@@ -1,7 +1,9 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE QuantifiedConstraints #-}
@@ -15,7 +17,6 @@
 module Zorja.FunctorDExpr where
 
 import Control.Applicative
-import Control.Comonad
 
 import Data.Functor.Foldable
 import Data.Distributive
@@ -26,9 +27,227 @@ import Fcf.Core
 
 import Zorja.Patchable
 import Zorja.ZHOAS
-    
+
+-- | Things of the  `ZFunctor` can represent either a value
+-- of a delta of that value. They take an extra type 'ILCOrder'
+-- to distinguish between the two. The combined value/delta is here
+-- called 'Jet' based on some of Phil Freeman's posts about Incremental
+-- Lambda Calculus in Purescript
+data ILCOrder = HKTValue | HKTDelta | HKTJet
+
+-- | A `ZFunctor' can work with values or deltas.
+-- This allows us to talk about both value and deltas
+-- in a single expression. The decision about whether we're talking about
+-- values or deltas is deferred until later.
+type ZFunctor = ILCOrder -> Type -> Type
+
+-- | An 'SFunctor' wraps a 'ZFunctor' to produce another 'ZFunctor'.
+-- Same as @ZFunctor -> ILCOrder -> Type -> Type@
+-- Type sig for a typical SFunctor is
+--  @SFunc :: (f :: ZFunctor) (d : ILCOrder) a@
+type SFunctor = ZFunctor -> ZFunctor
+
+
+-- | A ZFunctor that's just the value itself with no wrapper.
+type ZNoWrap (d :: ILCOrder) a = a
+
+-- | A way to combine/break apart value/delta pairs
+class ZJetify (f :: ZFunctor) where
+    fromJet :: f 'HKTJet a -> (f 'HKTValue a, f 'HKTDelta a)
+    toJet   :: (f 'HKTValue a, f 'HKTDelta a) -> f 'HKTJet a
+
+-- | Jetify for 'SFunctor's
+class SJetify (s :: SFunctor) where
+    fromSJet :: (ZJetify f) => s f 'HKTJet a -> (s f 'HKTValue a, s f 'HKTDelta a)
+    toSJet   :: (ZJetify f) => (s f 'HKTValue a, s f 'HKTDelta a) -> s f 'HKTJet a
+
+-- | Version of zipWith where two operands are 'HKTValue' and 'HKTDelta' types, that
+--   get  into 'HKTJet'.
+class SJetZip (f :: ZFunctor) where
+    jetZipWith :: (a -> b -> c) -> f 'HKTValue a -> f 'HKTDelta b -> f 'HKTJet c
+    jetUnzipWith :: (a -> (b,c)) -> f 'HKTJet a -> (f 'HKTValue b, f 'HKTDelta c)
 
 --
+
+-- | Identity as a `ZFunctor`
+data family ZIdentity (d :: ILCOrder) a
+
+data instance ZIdentity 'HKTValue a = ZIdentity a
+    deriving (Eq, Show)
+data instance ZIdentity 'HKTDelta a = ZDIdentity a
+    deriving (Eq, Show)
+data instance ZIdentity 'HKTJet a = ZJet a a
+    deriving (Eq, Show)
+
+type instance ILCDelta (ZIdentity 'HKTValue a) = ZIdentity 'HKTDelta a
+
+instance ZJetify ZIdentity where
+    fromJet (ZJet a da) = (ZIdentity a, ZDIdentity da)
+    toJet (ZIdentity a, ZDIdentity da) = ZJet a da
+
+instance Functor (ZIdentity 'HKTValue) where
+    fmap f (ZIdentity a) = ZIdentity (f a)
+
+instance Functor (ZIdentity 'HKTDelta) where
+    fmap f (ZDIdentity a) = ZDIdentity (f a)
+
+instance Functor (ZIdentity 'HKTJet) where
+    fmap f (ZJet a b) = ZJet (f a) (f b)
+
+
+
+
+-- | List as a `ZFunctor`
+newtype ZList (f :: ZFunctor) (d :: ILCOrder) a = ZList [f d a]
+    deriving (Eq, Show)
+
+data ZListF (f :: ZFunctor) (d :: ILCOrder) a x =
+      ZNil 
+    | ZCons (f d a) x
+    deriving (Eq, Show)
+
+type instance ILCDelta (ZList f 'HKTValue a) = ZList f 'HKTDelta a
+
+type instance Base (ZList f d a) = ZListF f d a
+
+instance (Functor (f d)) => Functor (ZList f d) where
+    fmap f (ZList xs) = ZList (fmap (fmap f) xs)
+
+instance (Functor (f d)) => Functor (ZListF f d a) where
+    fmap _ ZNil        = ZNil
+    fmap f (ZCons a x) = ZCons a (f x)
+
+instance (Functor (f d)) => Recursive (ZList f d a) where
+    project (ZList [])     = ZNil
+    project (ZList (x:xs)) = ZCons x (ZList xs)
+
+instance (Functor (f d)) => Corecursive (ZList f d a) where
+    embed ZNil                 = ZList []
+    embed (ZCons x (ZList xs)) = ZList (x:xs)
+
+instance (ZJetify f) => ZJetify (ZList f) where
+    fromJet (ZList aj) = let (a, da) = unzip $ fmap fromJet aj
+                         in (ZList a, ZList da)
+    toJet (ZList a, ZList da) = ZList $ zipWith (curry toJet) a da
+
+instance SJetify ZList where
+    fromSJet (ZList x) = let (x', dx') = unzip $ fmap fromJet x
+                         in (ZList x', ZList dx')
+    toSJet (ZList x, ZList dx) = ZList $ zipWith (curry toJet) x dx
+
+data ZMaybe (f :: ZFunctor) (d :: ILCOrder) a =
+      ZJust (f d a)
+    | ZNothing
+    deriving (Eq, Show)
+
+type instance ILCDelta (ZMaybe f 'HKTValue a) = ZMaybe f 'HKTDelta a
+
+instance (Functor (f d)) => Functor (ZMaybe f d) where
+    fmap f (ZJust a) = ZJust (fmap f a)
+    fmap _ ZNothing = ZNothing
+
+instance (ZJetify f) => ZJetify (ZMaybe f) where
+    fromJet ZNothing = (ZNothing, ZNothing)
+    fromJet (ZJust x) = let (a,da) = fromJet x
+                        in (ZJust a, ZJust da)
+    toJet (ZNothing, ZNothing) = ZNothing
+    toJet (ZJust a,  ZJust da) = ZJust (toJet (a,da))
+    toJet (_,        _)        = ZNothing
+
+
+
+
+-- | Fix point (recursive) data structure for' ZFunctor' types.
+newtype ZFix (f :: ZFunctor) (d :: ILCOrder) 
+    = ZFix (f d (ZFix f d))
+
+type instance ILCDelta (ZFix f 'HKTValue) = ZFix f 'HKTDelta
+
+type instance Base (ZFix f d) = f d
+
+instance (Functor (f d)) => Recursive (ZFix f d) where
+    project (ZFix f) = f
+
+
+
+-- | Fixed-point for one functor (an SFunctor) that takes another functor as
+--   a type argument (ZFunctor). Not sure but I think
+--   @SFix fh f d@ is equivalent to @ZFix (fH f) d@?
+newtype SFix (fH :: SFunctor) (f :: ZFunctor) (d :: ILCOrder)
+    = SFix (fH f d (SFix fH f d))
+
+type instance ILCDelta (SFix fH f 'HKTValue) = SFix fH f 'HKTDelta
+
+type instance Base (SFix fH f d) = fH f d
+
+instance (Functor (fH f d)) => Recursive (SFix fH f d) where
+    project (SFix f) = f
+
+
+-- | 'ZCofree' is a 'Cofree' where the payload is 'raw' and recursions
+--  are Value/Deltas.
+--  This is not too useful since we usually want @a@ to also
+--  support the value/delta polymorphism, thus 'SCofree'.
+data ZCofree (f :: ZFunctor) (d :: ILCOrder) a =
+    a :<= (f d (ZCofree f d a))
+
+-- | 'SCofree' is a 'Cofree' where one functor @f@ is applied to
+--   the payload @a@
+--   and a different functor @fb@ is applied to the recursive part.
+data SCofree (fb :: SFunctor) (f :: ZFunctor) (d :: ILCOrder) a =
+    (f d a) :<< (fb f d (SCofree fb f d a))
+
+-- | Non fixed-point representation for recursion-schemes
+data SCofreeF (fb :: SFunctor) (f :: ZFunctor) (d :: ILCOrder) a x =
+    (f d a) :<<= (fb f d x)
+
+type instance ILCDelta (SCofree fb f 'HKTValue a) = SCofree fb f 'HKTDelta a
+
+type instance Base (SCofree fb f d a) = SCofreeF fb f d a
+
+instance (Functor (fb f d), Functor (f d)) => Functor (SCofree fb f d) where
+    fmap f (a :<< x) = (fmap f a) :<< (fmap (fmap f) x)
+
+instance (Alternative (fb f d), Applicative (f d)) => Applicative (SCofree fb f d) where
+    (a :<< x) <*> (b :<< y) = (a <*> b) :<< (liftA2 (<*>) x y)
+    pure x = pure x :<< empty
+
+instance (SJetZip (fb f), SJetZip f) => SJetZip (SCofree fb f) where
+    jetZipWith :: (a -> b -> c) -> SCofree fb f 'HKTValue a -> SCofree fb f 'HKTDelta b -> SCofree fb f 'HKTJet c
+    jetZipWith f (a :<< x) (da :<< dx) = (jetZipWith f a da) :<< (jetZipWith (jetZipWith f) x dx)
+    jetUnzipWith :: (a -> (b,c)) -> SCofree fb f 'HKTJet a -> (SCofree fb f 'HKTValue b, SCofree fb f 'HKTDelta c)
+    jetUnzipWith f (ja :<< jx) = let (a,da) = jetUnzipWith f ja
+                                     (x,dx) = jetUnzipWith (jetUnzipWith f) jx
+                                 in
+                                     (a :<< x, da :<< dx)
+
+instance (Functor (fb f d)) => Functor (SCofreeF fb f d a) where
+    fmap f (x :<<= xs)  =  x :<<= (fmap f xs)
+
+instance (Functor (fb f d)) => Recursive (SCofree fb f d a) where
+    project (a :<< as)  =  a :<<= as
+
+instance (forall f. (SJetZip (SCofree fb f),  SJetZip (fb f))) => SJetify (SCofree fb) where
+    toSJet (a :<< x, da :<< dx) = (toJet (a,da)) :<< (jetZipWith (\x y-> toSJet (x,y)) x dx)
+    fromSJet (a :<< x) =
+        let (a',da') = fromJet a
+            (x',dx') = jetUnzipWith fromSJet x
+            v  = a'  :<< (x')
+            dv = da' :<< (dx')
+        in (v,dv)
+
+data ZZFExpr (f :: ZFunctor) a = ZZFE (f 'HKTValue a) (f 'HKTDelta a)
+
+instance (Show (f 'HKTValue a), Show (f 'HKTDelta a)) => Show (ZZFExpr f a) where
+    show (ZZFE f df) = "ZFExpr (" ++ show f ++ "/\\/" ++ show df ++ ")"
+
+instance (Eq (f 'HKTValue a), Eq (f 'HKTDelta a)) => Eq (ZZFExpr f a) where
+    (ZZFE a da) == (ZZFE b db) = (a == b) && (da == db)
+
+instance (Functor (f 'HKTValue), Functor (f 'HKTDelta)) => Functor (ZZFExpr f) where
+    fmap f (ZZFE a da) = ZZFE (fmap f a) (fmap f da)
+
+
 -- * Deferred Functors
 --
 -- $deferredFunctors
@@ -198,15 +417,15 @@ instance (ReifyFdistributive d) => Distributive (RFType d) where
     distribute x = dist x
         where
             -- need to use a where clause so we can pull out the types and populate proxies
-            dist :: forall a f d. (Functor f, ReifyFdistributive d) => f (RFType d a)  -> RFType d (f a)
-            dist fga = RFT $ rfdistribute (Proxy @d) (Proxy @a) (fmap unRFT fga)
+            dist :: forall a f dx. (Functor f, ReifyFdistributive dx) => f (RFType dx a)  -> RFType dx (f a)
+            dist fga = RFT $ rfdistribute (Proxy @dx) (Proxy @a) (fmap unRFT fga)
 
 instance (ReifyFdistributive d) => Distributive (RFTypeD d) where
     distribute x = dist x
         where
             -- need to use a where clause so we can pull out the types and populate proxies
-            dist :: forall a f d. (Functor f, ReifyFdistributive d) => f (RFTypeD d a)  -> RFTypeD d (f a)
-            dist fga = RFTD $ rfdistributeD (Proxy @d) (Proxy @a) (fmap unRFTD fga)
+            dist :: forall a f dx. (Functor f, ReifyFdistributive dx) => f (RFTypeD dx a)  -> RFTypeD dx (f a)
+            dist fga = RFTD $ rfdistributeD (Proxy @dx) (Proxy @a) (fmap unRFTD fga)
 
 --type instance RFBase (RFType d) a = RFBase d a
 type instance Base (RFType  d a) = RFType (RFBase  d a)
@@ -217,14 +436,14 @@ instance (ReifyFmap (RFBase d a), ReifyFrecursive d) => Recursive (RFType d a) w
       where
           -- ugh, type mangling
           t :: Eval (ReifyFunctor d a) -> RFType d a
-          t x = RFT x
+          t y = RFT y
 
 instance (ReifyFmap (RFBase d a), ReifyFrecursive d) => Recursive (RFTypeD d a) where
     project (RFTD x) = RFTD $ rfmapD (Proxy @(RFBase d a)) t $ rfprojectD (Proxy @d) (Proxy @a) x
         where
             -- ugh, type mangling
             t :: Eval (ReifyFunctorD d a) -> RFTypeD d a
-            t x = RFTD x
+            t y = RFTD y
 
 instance (ReifyFmap (RFBase d a), ReifyFcorecursive d) => Corecursive (RFType d a) where
     embed (RFT x) = RFT $ rfembed (Proxy @d) (Proxy @a) $ rfmap (Proxy @(RFBase d a)) t x
