@@ -31,7 +31,8 @@ common deps
                        free,
                        vector,
                        groups,
-                       first-class-families
+                       first-class-families,
+                       adjunctions
 
 
 common test-deps

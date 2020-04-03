@@ -15,14 +15,11 @@
 
 module Zorja.Primitives 
     (
-        -- * Identity for deferred functors
-        FIdentity(..),
         -- * A type where the delta simply replaces old values
         --
         -- $replaceOnly
         ReplaceOnly(..),
         Replacing(..),
-        ReplaceOnlyK,
         -- * A number where the delta is of the same numeric type
         --
         -- $diffNum
@@ -38,30 +35,6 @@ import Fcf.Core
 
 import Zorja.Patchable
 import Zorja.FunctorDExpr
-
--- | Deltas for Identity
-
-data IdentityK :: DeferredFunctor k
-
-newtype FIdentity a = FIdentity a
-
-type instance Eval (ReifyFunctor  IdentityK a) = FIdentity a
-type instance Eval (ReifyFunctorD IdentityK a) = FIdentity a
-
-instance Functor (FIdentity) where
-    fmap f (FIdentity a) = FIdentity (f a)
-
-instance ReifyFmap IdentityK where
-    rfmap _ f (FIdentity a) = FIdentity (f a)
-    rfmapD _ f (FIdentity a) = FIdentity (f a)
-    
-type instance ILCDelta (FIdentity a) = FIdentity a
-
-instance (PatchInstance a) => PatchInstance (FIdentity a) where
-    (FIdentity da) <^< (FIdentity da') = FIdentity (da <^< da')
-    noPatch = FIdentity noPatch
-
-
 
 
 -- $replaceOnly
@@ -91,11 +64,6 @@ newtype Replacing a = Replacing (Maybe a)
 
 type instance ILCDelta (ReplaceOnly a) = Replacing a
 
-instance ReifyFmap ReplaceOnlyK where
-    rfmap _ f (ReplaceOnly a) = ReplaceOnly (f a)
-    rfmapD _ f (Replacing da) = Replacing   (fmap f da)
-
-
 instance (Eq a) => Patchable (ReplaceOnly a) where
     patch (ReplaceOnly a) (Replacing da) = ReplaceOnly $ fromMaybe a da
     changes (ReplaceOnly a) (ReplaceOnly b) =
@@ -111,13 +79,6 @@ instance PatchInstance (Replacing a) where
                     (Just _, Just b') -> Just b'
         in Replacing c
     noPatch = Replacing Nothing
-
--- | a kind to use 'ReplaceOnly' with deferred functors found in 'Zorja.FunctorDExpr'
-data ReplaceOnlyK :: DeferredFunctor k
-
-type instance Eval (ReifyFunctor ReplaceOnlyK a) = ReplaceOnly a
-type instance Eval (ReifyFunctorD ReplaceOnlyK a) = Replacing a
-
     
 
 

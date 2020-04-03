@@ -15,6 +15,7 @@ import Fcf
 
 import Data.Proxy
 import Data.Functor.Foldable
+import Data.List.NonEmpty
 
 import Zorja.Patchable
 import Zorja.FunctorDExpr
@@ -32,7 +33,7 @@ newtype ListX a  = ListX [a]
     deriving (Semigroup,Monoid) via [a]
 
 -- | 'ListXD (ILCDelta a)' is @ILCDelta (ListX a)@
-newtype ListXD a = ListXD [a]
+newtype ListXD a = ListXD (NonEmpty a)
     deriving (Eq, Show)
     deriving (Applicative, Functor, Foldable) via []
     deriving (Semigroup,Monoid) via [a]
@@ -52,6 +53,7 @@ instance (PatchInstance a) => PatchInstance (ListXD a) where
 instance (Patchable a,PatchInstance (ILCDelta a)) => Patchable (ListX a) where
     patch (ListX a) (ListXD da) = ListX $ zipWith patch a da
     changes (ListX a) (ListX a') = ListXD $ zipWith changes a a'
+
 
 
 -- | A 'DeferredFunctor' kind to indicate 'ListX' and 'ListXD'

@@ -32,18 +32,17 @@ class ZHOAS rep where
     type ZOk rep a :: Constraint
     lam :: (ZOk rep a, ZOk rep b, ZOk rep (a -> b)) => (rep a -> rep b) -> rep (a -> b)
     app :: (ZOk rep a, ZOk rep b, ZOk rep (a -> b)) => rep (a -> b) -> rep a -> rep b
+    eval :: (ZOk rep a) => rep a -> a
 
 
 -- |The type ZE lets you eval a ZHOAS expression as a simple value or function a -> b
 newtype ZE a = ZE { unZE :: a }
 
-evalZE :: ZE a -> a
-evalZE = unZE
-
 instance ZHOAS ZE where
     type ZOk ZE a = ()
-    lam f   = ZE $ \a -> evalZE $ f (ZE a)
-    app f a = ZE $ (evalZE f) (evalZE a)
+    lam f   = ZE $ \a -> eval $ f (ZE a)
+    app f a = ZE $ (eval f) (eval a)
+    eval (ZE a) = a
 
 
 --
@@ -62,7 +61,6 @@ instance ZHOAS ZE where
 -- obvious here.
 
 data ZDExpr a where
-    ZDF :: (Patchable a, Patchable b) => (ZDExpr a -> ZDExpr b) -> ZDExpr (a -> b)
     ZDV :: (Patchable a) => a -> ILCDelta a -> ZDExpr a
 
 zdValue :: (Patchable a) => ZDExpr a -> a
@@ -77,25 +75,19 @@ zdApplyPatch zv = let (x,dx) = zdEval zv
 
 
 zdEval :: (Patchable a) => ZDExpr a -> (a, ILCDelta a)
-zdEval (ZDF zf)   = (f,df)
-    where f = \a -> zdValue $ zf (ZDV a noPatch)
-          df = \a -> \da -> zdPatch $ zf (ZDV a da)
 zdEval (ZDV a da) = (a, da)
 
 instance ZHOAS ZDExpr where
     type ZOk ZDExpr a = Patchable a
-    lam zf = ZDF zf
-    app (ZDF zf) a = zf a
+    lam zf = ZDV (\a -> zdValue (zf (ZDV a noPatch)))
+                 (\a da -> zdPatch (zf (ZDV a da)))
     app (ZDV f df) val = let (a,da) = zdEval val
                          in  ZDV (f a) (df a da)
+    eval = zdApplyPatch
     
 instance (Patchable a, Show a, Show (ILCDelta a)) => Show (ZDExpr a) where
-    show (ZDF _zf) = "(ZDExpr Function)"
     show (ZDV a da) = "(ZDExpr Value: " ++ show a ++ "," ++ show da ++ ")"
 
-data SelfDeltaExpr a = SDE a a
-instance Functor SelfDeltaExpr where
-    fmap f (SDE a0 a1) = SDE (f a0) (f a1)
 
 {-
 data FunctorDeltaExpr a da = FDE a da (Iso' da a) deriving (Eq, Show)
@@ -174,6 +166,7 @@ instance (Patchable (a -> b), StructurePatchable a, StructurePatchable b) => Str
 --
 -- Distributive typeclass over ZDExpr. Needed for catamorphism and friends
 --
+
 
 
 zdCompose :: (Patchable a, Patchable b, Patchable c) =>
