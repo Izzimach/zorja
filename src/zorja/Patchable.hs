@@ -1,5 +1,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -21,12 +22,28 @@ module Zorja.Patchable (
     (<^<),
     noPatch,
     ILCDelta,
+    ValDelta,
+    ValDeltaBundle,
+    bundleVD,
+    unbundleVD,
+    patchVD,
+    mapVD,
+    autoPatch,
     SelfDelta,
+    Jet1(..),
+    bundleJet,
+    unbundleJet,
     valueToDelta,
     deltaToValue,
     SelfPatchable(..),
-    patchGeneric, 
-    changesGeneric
+    patchGeneric,
+    changesGeneric,
+    combineGeneric,
+    noPatchGeneric,
+    bundleVDGeneric,
+    unbundleVDGeneric,
+    BoolD(..),
+    BoolVD(..)
     )
     where
 
@@ -39,10 +56,11 @@ import Control.Applicative
 -- | For a type @a@ there is a delta @ILCDelta a@ that describes how to
 --  make changes to @a@ and produce a new value: @patch a (ILCDelta a) = a'@
 --  ILC in this case is "Incremental Lambda Calculus"
-type family ILCDelta a
+type family ILCDelta a = da | da -> a
 
 -- | unit is it's own ILC delta
 type instance (ILCDelta ()) = ()
+
 
 -- | Class for combining 'ILCDelta' values.
 -- Two patches can be combined. If we have two patches @da@ and @da'@ then
@@ -53,7 +71,12 @@ type instance (ILCDelta ()) = ()
 --
 class PatchInstance a where
     (<^<) :: a -> a -> a
+    default (<^<) :: (Generic a, PatchInstanceG (Rep a)) => a -> a -> a
+    (<^<) = combineGeneric
+
     noPatch :: a
+    default noPatch :: (Generic a, PatchInstanceG (Rep a)) => a
+    noPatch = noPatchGeneric
 
 -- | 'mergePatches' is a synonym for '(<^<)'
 mergePatches :: (PatchInstance a) => a -> a -> a
@@ -72,8 +95,13 @@ mergePatches = (<^<)
 class (PatchInstance (ILCDelta a)) => Patchable a where
   -- | @patch x dx@ applies the changes in @dx@ to @x@
   patch :: a -> ILCDelta a -> a
+  default patch :: (Generic a, Generic (ILCDelta a), PatchableG (Rep a) (Rep (ILCDelta a))) => a -> ILCDelta a -> a
+  patch = patchGeneric
+
   -- | @changes x x'@ generates a @dx :: ILCDelta a@ that can convert @x@ into @x'@ using @patch@
   changes ::  a -> a -> ILCDelta a
+  default changes :: (Generic a, Generic (ILCDelta a), PatchableG (Rep a) (Rep (ILCDelta a))) => a -> a -> ILCDelta a
+  changes = changesGeneric
 
 
 
@@ -82,6 +110,69 @@ class (PatchInstance (ILCDelta a)) => Patchable a where
 class (Patchable a) => SelfDelta a where
   valueToDelta :: a -> ILCDelta a
   deltaToValue :: ILCDelta a -> a
+
+
+
+-- | A @ValDelta@ is a value and it's delta bound together. Often this is
+--   just a tuple '(a, ILCDelta a)' or the equivalent 'Jet1 a' but in some cases this may be some
+--   other type for complicated or container types.
+--   For example 'ValDelta [a]' might be '[(a, ILCDelta a)]' instead of '([a],[ILCDelta a])'
+--
+type family ValDelta a = ja | ja -> a
+
+class ValDeltaBundle a where
+  bundleVD :: (a, ILCDelta a) -> ValDelta a
+  default bundleVD ::
+    (Generic a, 
+     Generic (ILCDelta a), 
+     Generic (ValDelta a),
+     ValDeltaBundleG (Rep a) (Rep (ILCDelta a)) (Rep (ValDelta a)))
+     => (a, ILCDelta a) -> ValDelta a
+  bundleVD = bundleVDGeneric
+
+  unbundleVD :: ValDelta a -> (a, ILCDelta a)
+  default unbundleVD ::
+    (Generic a,
+     Generic (ILCDelta a),
+     Generic (ValDelta a),
+     ValDeltaBundleG (Rep a) (Rep (ILCDelta a)) (Rep (ValDelta a)))
+    => ValDelta a -> (a, ILCDelta a)
+  unbundleVD = unbundleVDGeneric
+
+  -- | patch the ValDelta 'in-place'. By default this runs @unbundleVD@ and @patch@,
+  --   but some data representations may have a faster implementation.
+  patchVD :: (Patchable a) => ValDelta a -> a
+  patchVD = (uncurry patch) . unbundleVD
+
+
+-- | Given a function from 'a -> b' this will generate a function 'ValDelta a -> ValDelta b'.
+--   It won't be efficient but hopefully it will be correct
+mapVD :: (ValDeltaBundle a, ValDeltaBundle b, Patchable a, Patchable b)
+    => (a -> b) -> (ValDelta a) -> (ValDelta b)
+mapVD f = \vda -> let (a,da) = unbundleVD vda
+                      b = f a
+                      b' = f (patch a da)
+                      db = changes b b'
+                  in bundleVD (b,db)
+
+-- | Given a function from 'ValDelta a -> ValDelta b' this converts it to 'a -> b'
+autoPatch :: (ValDeltaBundle a, ValDeltaBundle b, Patchable a, Patchable b)
+    => (ValDelta a -> ValDelta b) -> (a -> b)
+autoPatch df = \a -> patchVD $ df $ bundleVD (a,noPatch)
+
+-- | The default @ValDelta@ is just a product. Note that other
+--   structures may have a different definition for @valDelta@.
+data Jet1 a = Jet1 a (ILCDelta a)
+
+
+bundleJet :: (a, ILCDelta a) -> Jet1 a
+bundleJet (a,da) = Jet1 a da
+
+unbundleJet :: Jet1 a -> (a, ILCDelta a)
+unbundleJet (Jet1 a da) = (a,da)
+
+deriving instance (Eq a, Eq (ILCDelta a)) => Eq (Jet1 a)
+deriving instance (Show a, Show (ILCDelta a)) => Show (Jet1 a)
 
 
 --
@@ -137,7 +228,64 @@ instance (PatchInstance a, PatchInstance b) => PatchInstance (a,b) where
 instance (Patchable a, Patchable b) => Patchable (a,b) where
     patch (a,b) (da,db) = (patch a da, patch b db)
     changes (a0,b0) (a1,b1) = (changes a0 a1, changes b0 b1)
-  
+
+
+
+type instance ILCDelta (Maybe a) = Maybe (ILCDelta a)
+type instance ValDelta (Maybe a) = Maybe (ValDelta a)
+
+-- | Here we use 'Maybe' as a Sum type which can switch between 'Nothing' and @'Just' x@.
+--   Another interpretation is that 'Nothing' means an empty patch or no changes. For this sort
+--   of thing use 'ReplaceOnly'
+
+instance (Patchable a) => Patchable (Maybe a) where
+    patch Nothing Nothing = Nothing
+    patch (Just x) (Just dx) = Just (patch x dx)
+    patch _ _ = error "Patch mismatch for Maybe"
+
+    changes Nothing Nothing = Nothing
+    changes (Just x) (Just x') = Just (changes x x')
+    changes _ _ = error "Mismatch for changes of a Maybe"
+
+instance (PatchInstance a) => PatchInstance (Maybe a) where
+    Nothing <^< Nothing = Nothing
+    Just dx <^< Just dx' = Just (dx <^< dx')
+    _ <^< _ = error "Mismatch for patch merge"
+
+    noPatch = undefined
+
+instance (ValDeltaBundle a) => ValDeltaBundle (Maybe a) where
+    bundleVD (Nothing, Nothing) = Nothing
+    bundleVD (Just x, Just dx) = Just (bundleVD (x,dx))
+    bundleVD (_,_) = error "Mismatch in bundleVD for Maybe"
+
+    unbundleVD Nothing = (Nothing, Nothing)
+    unbundleVD (Just v) = let (x,dx) = unbundleVD v
+                          in (Just x, Just dx)
+
+
+--
+-- Delta and ValDelta for Bool
+--
+
+data BoolD = BoolD
+data BoolVD = BoolVD Bool BoolD
+
+type instance ILCDelta Bool = BoolD
+type instance ValDelta Bool = BoolVD
+
+instance Patchable Bool where
+    patch x _ = x
+    changes _ _ = BoolD
+
+instance PatchInstance BoolD where
+    BoolD <^< BoolD = BoolD
+
+    noPatch = BoolD
+
+instance ValDeltaBundle Bool where
+    bundleVD (x,_) = BoolVD x BoolD
+    unbundleVD (BoolVD x BoolD) = (x,BoolD)
 
 --
 -- | If a is a group, we can generate a Patchable type where the 
@@ -151,7 +299,7 @@ instance (Patchable a, Patchable b) => Patchable (a,b) where
 --   We need @a@ to be a group since computing @changes@ requires the inverse of @a@
 --
 
-data SelfPatchable a = SelfPatchable a deriving (Eq, Show)
+newtype SelfPatchable a = SelfPatchable a deriving (Eq, Show)
 
 
 type instance ILCDelta (SelfPatchable a) = SelfPatchable a
@@ -192,91 +340,164 @@ instance (Group a, PatchInstance a) => Patchable (SelfPatchable a) where
 instance (Ord a) => Ord (SelfPatchable a) where
     (SelfPatchable a) <= (SelfPatchable b) = a <= b
 
-
+--
 -- | Patchable generics, useful for records or extended sum types
 --
-class PatchG i o where
+
+type instance ILCDelta (K1 i x p) = K1 i (ILCDelta x) p
+type instance ILCDelta ((:+:) x y p) = ((:+:) x y p)
+
+class PatchableG i o where
   patchG :: i p -> o p -> i p
   changesG :: i p -> i p -> o p
 
-instance (Patchable x, dx ~ ILCDelta x) => PatchG (K1 a x) (K1 a dx) where
+instance (Patchable x, dx ~ ILCDelta x) => PatchableG (K1 a x) (K1 a dx) where
   patchG :: K1 a x p -> K1 a (ILCDelta x) p -> K1 a x p
   patchG (K1 x) (K1 dx) = K1 $ patch x dx
   changesG :: K1 a x p -> K1 a x p -> K1 a (ILCDelta x) p
   changesG (K1 x0) (K1 x1) = K1 $ changes x0 x1
   
 
-instance (PatchG i o, PatchG i' o') => PatchG (i :*: i') (o :*: o') where
+instance (PatchableG i o, PatchableG i' o') => PatchableG (i :*: i') (o :*: o') where
   patchG (l0 :*: r0) (l1 :*: r1) = (patchG l0 l1) :*: (patchG r0 r1)
   changesG (l0 :*: r0) (l1 :*: r1) = (changesG l0 l1) :*: (changesG r0 r1)
 
 --
--- patch for a sum type allow patching a current value (left choices),
--- or switching to a separate value (right choices)
---
--- this means the change type for (A | B) would be:
---   (A :+: B :+: (ILCDelta (A | B)))
+-- patch for a sum type checks the value and delta. If they have the same tag
+-- the patch is applied, otherwise it is ignored.
 --
 
-instance (PatchG i o, PatchG i' o')
-    => PatchG (i :+: i') (i :+: i' :+: o :+: o') where
-  patchG (L1 a) (R1 (R1 (L1 da))) = L1 $ patchG a da
-  patchG _ (R1 (L1 b))  = R1 $ b
-  patchG (R1 b) (R1 (R1 (R1 db))) = R1 $ patchG b db
-  patchG _ (L1 a)  = L1 $ a
-  -- these should not occur, sigh
-  patchG (L1 _) (R1 (R1 (R1 _))) = undefined
-  patchG (R1 _) (R1 (R1 (L1 _))) = undefined
-
+instance (PatchableG i o, PatchableG i' o') => PatchableG (i :+: i') (o :+: o') where
+  patchG (L1 a) (L1 da) = L1 $ patchG a da
+  patchG (L1 a) (R1 _)  = error "Mismatched Sum type when attempting patch"
+  patchG (R1 b) (R1 db) = R1 $ patchG b db
+  patchG (R1 b) (L1 _)  = error "Mismatched Sum type when attempting patch"
   
-  changesG (L1 a) (L1 a') = R1 . R1 . L1 $ changesG a a'
-  changesG (L1 _) (R1 b)  = R1 . L1 $ b
-  changesG (R1 _) (L1 a)  = L1 $ a
-  changesG (R1 b) (R1 b') = R1 . R1 . R1  $ changesG b b'
+  changesG (L1 a) (L1 a') = L1 $ changesG a a'
+  changesG (R1 b) (R1 b') = R1 $ changesG b b'
+  changesG (L1 a) (R1 _)  = error "Mismatched Sum type when attempting patch"
+  changesG (R1 b) (L1 _)  = error "Mismatched Sum type when attempting patch"
 
-instance (PatchG i o) => PatchG (M1 _a _b i) (M1 _a' _b' o) where
+instance (PatchableG i o) => PatchableG (M1 _a _b i) (M1 _a' _b' o) where
   patchG   (M1 x) (M1 dx) = M1 $ patchG x dx
   changesG (M1 x) (M1 y)  = M1 $ changesG x y
 
 
-instance PatchG V1 V1 where
+instance PatchableG V1 V1 where
   patchG   = undefined
   changesG = undefined
 
-instance PatchG U1 U1 where
+instance PatchableG U1 U1 where
   patchG U1 U1   = U1
   changesG U1 U1 = U1
-
---
--- ILCDelta for generics
---
-
 
 
 patchGeneric ::
   (Generic f,
    Generic (ILCDelta f),
---    Monoid (ILCDelta f),
-   PatchG (Rep f) (Rep (ILCDelta f)))
+   PatchableG (Rep f) (Rep (ILCDelta f)))
   => f -> (ILCDelta f) -> f
 patchGeneric a da = to $ patchG (from a) (from da)
 
 changesGeneric ::
   (Generic f,
    Generic (ILCDelta f),
-   PatchG (Rep f) (Rep (ILCDelta f)))
+   PatchableG (Rep f) (Rep (ILCDelta f)))
   => f -> f -> (ILCDelta f)
 changesGeneric a b = to $ changesG (from a) (from b)  
   
---  patch a da = to $ patchG (from a) (from da)
---  changes a a' = to $ changesG (from a) (from a')
+
+--
+-- PatchInstance for Generics
+--
+
+class PatchInstanceG i where
+  combineG :: i p -> i p -> i p -- ^ generic version of '<^<'
+  noPatchG :: i p
+
+instance (PatchInstance dx) => PatchInstanceG (K1 a dx) where
+  combineG :: K1 a dx p -> K1 a dx p -> K1 a dx p
+  combineG (K1 dx1) (K1 dx2) = K1 $ dx1 <^< dx2
+  noPatchG = K1 noPatch
+
+instance (PatchInstanceG i, PatchInstanceG i') => PatchInstanceG (i :*: i') where
+  combineG (l0 :*: r0) (l1 :*: r1) = (combineG l0 l1) :*: (combineG r0 r1)
+  noPatchG = noPatchG :*: noPatchG
+
+
+instance (PatchInstanceG i, PatchInstanceG i') => PatchInstanceG (i :+: i') where
+  combineG (L1 a0) (L1 a1) = L1 $ combineG a0 a1
+  combineG (R1 b0) (R1 b1) = R1 $ combineG b0 b1
+  combineG (L1 _) (R1 _)  = error "Mismatch when combining patches of a Sum Type"
+  combineG (R1 _) (L1 _)  = error "Mismatch when combining patches of a Sum Type"
+
+  noPatchG = undefined -- can't produce a proper noPatch for sum types
+
+
+instance (PatchInstanceG i) => PatchInstanceG (M1 _a _b i) where
+  combineG   (M1 x) (M1 dx) = M1 $ combineG x dx
+  noPatchG = M1 noPatchG
+
+
+-- can't combine void values
+instance PatchInstanceG V1 where
+  combineG = undefined
+  noPatchG = undefined
+
+instance PatchInstanceG U1 where
+  combineG U1 U1   = U1
+  noPatchG = U1
+
+combineGeneric :: (Generic v, PatchInstanceG (Rep v)) => v -> v -> v
+combineGeneric a a' = to $ combineG (from a) (from a')
+
+noPatchGeneric :: (Generic v, PatchInstanceG (Rep v)) => v
+noPatchGeneric = to $ noPatchG
 
 
 --
--- The patchable for a sum type @a@ has two constructors:
---  - NewSum @a@ replaces the current val with the new value @a@. For
---        a sum type this is how you switch to a different constructor
---  - PatchSum @da@ applies the patch @da@ to the current value. The type
---        of @da@ is the Patchable of the constructor of the current value.
+-- ValDelta for Generics
 --
+class ValDeltaBundleG v d o where
+  bundleVDG :: (v :*: d) p -> o p
+  unbundleVDG :: o p -> (v :*: d) p
+
+instance (ValDeltaBundle x, dx ~ ILCDelta x, ValDelta x ~ o) => ValDeltaBundleG (K1 a x) (K1 a dx) (K1 a o) where
+  bundleVDG (K1 x :*: K1 dx) = K1 $ bundleVD (x, dx)
+  unbundleVDG (K1 v)         = let (x,dx) = unbundleVD v
+                               in (K1 x) :*: (K1 dx)
+
+instance (ValDeltaBundleG x dx o, 
+          ValDeltaBundleG x' dx' o') => ValDeltaBundleG (x :*: x') (dx :*: dx') (o :*: o') where
+  bundleVDG ((l0 :*: l1) :*: (dl0 :*: dl1)) = (bundleVDG (l0 :*: dl0)) :*: (bundleVDG (l1 :*: dl1))
+  unbundleVDG (v :*: v')                    = let (x :*: dx) = unbundleVDG v
+                                                  (x' :*: dx') = unbundleVDG v'
+                                              in ((x :*: x') :*: (dx :*: dx'))
+
+instance (ValDeltaBundleG x dx o, 
+          ValDeltaBundleG x' dx' o') => ValDeltaBundleG (x :+: x') (dx :+: dx') (o :+: o') where
+  bundleVDG ((L1 x) :*: (L1 dx)) = L1 $ bundleVDG (x :*: dx)
+  bundleVDG ((R1 x) :*: (R1 dx)) = R1 $ bundleVDG (x :*: dx)
+  bundleVDG ((L1 _) :*: (R1 _)) = error "Cannot bundle disjoint elements of a tagged union"
+  bundleVDG ((R1 _) :*: (L1 _)) = error "Cannot bundle disjoint elements of a tagged union"
+
+  unbundleVDG (L1 v) = let (x :*: dx) = unbundleVDG v
+                       in (L1 x :*: L1 dx)
+  unbundleVDG (R1 v) = let (x :*: dx) = unbundleVDG v
+                       in (R1 x :*: R1 dx)
+
+instance (ValDeltaBundleG v d o) => ValDeltaBundleG (M1 _a _b v) (M1 _a' _b' d) (M1 _x _y o) where
+  bundleVDG ((M1 x) :*: (M1 dx)) = M1 $ bundleVDG (x :*: dx)
+  unbundleVDG (M1 v) = let (x :*: dx) = unbundleVDG v
+                       in ((M1 x) :*: (M1 dx))
+
+bundleVDGeneric :: (Generic v, Generic d, Generic o,
+                    (ValDeltaBundleG (Rep v) (Rep d) (Rep o))) => (v, d) -> o
+bundleVDGeneric (v,d) = to $ bundleVDG ((from v) :*: (from d))
+
+unbundleVDGeneric :: (Generic v, Generic d, Generic o,
+                      (ValDeltaBundleG (Rep v) (Rep d) (Rep o))) => o -> (v,d)
+unbundleVDGeneric o = let (v :*: dv) = unbundleVDG (from o)
+                      in (to v,to dv)
+
 

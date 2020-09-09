@@ -16,8 +16,8 @@
 #  name: custom-snapshot
 #  location: "./custom-snapshot.yaml"
 #resolver: lts-13.27
-resolver: lts-14.4
-#resolver: nightly-2018-11-16
+#resolver: lts-14.4
+resolver: nightly-2020-06-19
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -43,7 +43,12 @@ packages:
 # (e.g., acme-missiles-0.3)
 extra-deps:
 - generic-data-0.3.0.0@sha256:86cac53570f45f5b1e5f54d8765d0a05f1674b3703e4dbb48a919f89c57b3cbc
-- base-orphans-0.8@sha256:4885caa82ab94fa5cb841d6d06a43a97cdc7e835f346be4f11c1cc5707b886db
+#- base-orphans-0.8@sha256:4885caa82ab94fa5cb841d6d06a43a97cdc7e835f346be4f11c1cc5707b886db
+- hedgehog-classes-0.2.4.1@sha256:9097738d37a8dec291f6478639dfc02857df160cc5b8fc7f7ab7e9a9130c25b1,5404
+#- constrained-categories-0.4.0.0@sha256:478e481b2ae62f3ff21c900ab9f26a5f01cc0b5b8f4a96f44c6e005970ed2639,3534
+- git: https://github.com/leftaroundabout/constrained-categories.git
+  commit: 07bea2fdaebfad63edde7f09a1e966477fd95b0d
+- trivial-constraint-0.4.0.0@sha256:819468024c1eab92abdbb52427a81a6e31bbd458cd0185b4709310569d08256a,1679
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

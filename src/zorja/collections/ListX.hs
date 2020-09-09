@@ -15,7 +15,6 @@ import Fcf
 
 import Data.Proxy
 import Data.Functor.Foldable
-import Data.List.NonEmpty
 
 import Zorja.Patchable
 import Zorja.FunctorDExpr
@@ -33,12 +32,22 @@ newtype ListX a  = ListX [a]
     deriving (Semigroup,Monoid) via [a]
 
 -- | 'ListXD (ILCDelta a)' is @ILCDelta (ListX a)@
-newtype ListXD a = ListXD (NonEmpty a)
+newtype ListXD a = ListXD [a]
     deriving (Eq, Show)
     deriving (Applicative, Functor, Foldable) via []
     deriving (Semigroup,Monoid) via [a]
 
 type instance ILCDelta (ListX a) = ListXD (ILCDelta a)
+
+type instance ValDelta (ListX a) = ListX (ValDelta a)
+
+instance (ValDeltaBundle a) => ValDeltaBundle (ListX a) where
+  bundleVD :: (ListX a, ListXD (ILCDelta a)) -> ListX (ValDelta a)
+  bundleVD (ListX a, ListXD da) = ListX $ zipWith (curry bundleVD) a da
+  unbundleVD :: ListX (ValDelta a) -> (ListX a, ListXD (ILCDelta a))
+  unbundleVD (ListX x) = let (a,da) = unzip $ fmap unbundleVD x
+                         in (ListX a, ListXD da)
+
 
 
 {-newtype ListX f a = ListX [Eval (ReifyFunctor f a)]
@@ -47,25 +56,12 @@ type instance ILCDelta (ListX a) = ListXD (ILCDelta a)
 
 instance (PatchInstance a) => PatchInstance (ListXD a) where
     (ListXD a) <^< (ListXD b) = ListXD $ zipWith (<^<) a b
-    -- this is an infinite empty list
-    noPatch = ListXD $ repeat noPatch
+    -- missing items are 'noaPatch' this is an empty list
+    noPatch = ListXD []
 
 instance (Patchable a,PatchInstance (ILCDelta a)) => Patchable (ListX a) where
     patch (ListX a) (ListXD da) = ListX $ zipWith patch a da
     changes (ListX a) (ListX a') = ListXD $ zipWith changes a a'
-
-
-
--- | A 'DeferredFunctor' kind to indicate 'ListX' and 'ListXD'
-data ListXK (d :: DeferredFunctor k) :: DeferredFunctor k
-
-type instance Eval (ReifyFunctor  (ListXK d) a) = ListX  (Eval (ReifyFunctor d a))
-type instance Eval (ReifyFunctorD (ListXK d) a) = ListXD (Eval (ReifyFunctorD d a))
-
-instance (ReifyFmap d) => ReifyFmap (ListXK d) where
-    rfmap  _p f (ListX  a)  = ListX  $ fmap (rfmap  (Proxy @d) f) a
-    rfmapD _p f (ListXD da) = ListXD $ fmap (rfmapD (Proxy @d) f) da
-    
 
 
 -- | Non-recursive functor representation of 'ListX' for 'recursion-schemes'
@@ -109,20 +105,3 @@ instance Corecursive (ListXD a) where
     embed (ConsXD x (ListXD xs)) = ListXD (x:xs)
     embed NilXD                  = ListXD []
 
-
-data ListXFK (d :: DeferredFunctor k) a :: DeferredFunctor k
-
-type instance Eval (ReifyFunctor (ListXFK d a) x)  = ListXF  (Eval (ReifyFunctor d a)) x
-type instance Eval (ReifyFunctorD (ListXFK d a) x) = ListXFD (Eval (ReifyFunctorD d a)) (ILCDelta x)
-
--- | Kind-level mapping of @Base (ListX a) = ListXF a@
-type instance RFBase (ListXK d) a = ListXFK d a
-
-instance (ReifyFmap d) => ReifyFrecursive (ListXK (d :: DeferredFunctor k)) where
-    --rfproject :: ListX a -> ListXF a x
-    --rfproject _pd _pa (ListX [])     = NilX
-    --rfproject _pd _pa (ListX (x:xs)) = ConsX x (ListX xs)
-    rfproject _pd _pa = project
-
-instance (ReifyFmap d) => ReifyFcorecursive (ListXK (d :: DeferredFunctor k)) where
-    rfembed _pd _pa = embed

@@ -20,6 +20,7 @@ common deps
   build-depends:       base >= 4.7 && < 5,
                        constraints,
                        containers,
+                       hashable,
                        lens,
                        mtl,
                        text,
@@ -30,9 +31,13 @@ common deps
                        distributive,
                        free,
                        vector,
+                       kan-extensions,
                        groups,
                        first-class-families,
-                       adjunctions
+                       adjunctions,
+                       constrained-categories,
+                       hedgehog,
+                       hedgehog-classes
 
 
 common test-deps

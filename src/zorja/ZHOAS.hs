@@ -89,80 +89,6 @@ instance (Patchable a, Show a, Show (ILCDelta a)) => Show (ZDExpr a) where
     show (ZDV a da) = "(ZDExpr Value: " ++ show a ++ "," ++ show da ++ ")"
 
 
-{-
-data FunctorDeltaExpr a da = FDE a da (Iso' da a) deriving (Eq, Show)
-
-instance (Functor f) => Functor (FunctorDeltaExpr f) where
-    fmap f (FDE a fa) = FDE (f a) (fmap f fa)
-
-instance (Applicative f) => Applicative (FunctorDeltaExpr f) where
-    pure x = FDE x (pure x)
-    (FDE f df) <*> (FDE a da) = FDE (f a) (df <*> da)
-
-
-instance (Foldable f) => Foldable (FunctorDeltaExpr f) where
-    foldMap f (FDE a fa) = (f a) <> (foldMap f fa)
-
-instance (Traversable f) => Traversable (FunctorDeltaExpr f) where
-    traverse f (FDE a fa) = FDE <$> (f a) <*> (traverse f fa)
-
-instance (Distributive f) => Distributive (FunctorDeltaExpr f) where
-    distribute fga = FDE (fmap gval fga) (collect gchange fga)
-        where
-            gval (FDE a _) = a
-            gchange (FDE _ fa) = fa
-
-instance (Functor f) => Comonad (FunctorDeltaExpr f) where
-    extract (FDE a fa) = a
-    duplicate x@(FDE a fa) = FDE x (fmap (const x) fa)
-    extend f x@(FDE a fa) = FDE (f x) (fmap (const (f x)) fa)
--}
-
---
--- | A property of some data structures is that they
--- can represent adding or removing an element as a ZDExpr,
--- so they can be embedded into a structural changing data structure.
--- This allows us to use @Functor@ and @Foldable@ with data structures
--- that add and remove elements.
---
-{-
-data SDExpr a where
-    SDF :: (SDExpr a -> SDExpr b) -> SDExpr (a -> b)
-    SDV :: a -> ILCDelta a -> SDExpr a
-    SDAdd :: a -> SDExpr a
-    SDDelete :: a -> SDExpr a
-
-class (Patchable a) => StructurePatchable a where
-    fromSDExpr :: SDExpr a -> ZDExpr a
-    toSDExpr :: ZDExpr a -> SDExpr a
-
-instance ZHOAS SDExpr where
-    type ZOk SDExpr a = StructurePatchable a
-    lam sf = SDF sf
-    app (SDF sf) x = sf x
-    app (SDV f df) x = let (a,da) = zdEval $ fromSDExpr x
-                       in  SDV (f a) (df a da)
-    app (SDAdd f) x = undefined {-let (a,_) = zdEval $ fromSDExpr x
-                      in SDAdd (f a)-}
-    app (SDDelete f) x = undefined {-let (a,_) = zdEval $ fromSDExpr x
-                         in SDDelete (f a)-}
--}
-
-{-
--- | Functions as SDExprs
-instance (Patchable (a -> b), StructurePatchable a, StructurePatchable b) => StructurePatchable (a -> b) where
-    fromSDExpr (SDF sf)     = ZDF (fromSDExpr . sf . toSDExpr)
-    fromSDExpr (SDV a da)   = ZDV a da
-    -- figure out what these mean more rigorously before implementing them!
-    fromSDExpr (SDAdd f)    = undefined {-ZDF $ \zx -> let (x,dx) = zdEval zx
-                                           in fromSDExpr (SDAdd (f x))-}
-    fromSDExpr (SDDelete f) = undefined {-ZDF $ \zx -> let (x,dx) = zdEval zx
-                                           in fromSDExpr (SDDelete (f x))-}
-
-    toSDExpr (ZDF zf) = SDF (toSDExpr . zf . fromSDExpr)
-    toSDExpr (ZDV a da) = SDV a da
--}
-
 --
 -- Distributive typeclass over ZDExpr. Needed for catamorphism and friends
 --
@@ -204,7 +130,10 @@ instance PatchInstance BoolChange where
 
 newtype ZBool = ZBool { unZBool :: Bool } deriving (Eq)
 
+data BoolJet = BoolJet ZBool BoolChange
+
 type instance (ILCDelta ZBool) = BoolChange
+type instance (ValDelta ZBool) = BoolJet
 
 instance Patchable ZBool where
     patch a da = case da of
@@ -218,6 +147,15 @@ instance Patchable ZBool where
 instance Semigroup ZBool where
     (ZBool a) <> (ZBool b) = ZBool (a || b)
 
+
+vdIf :: (Patchable a, ValDeltaBundle a) => (ZBool -> a) -> (BoolJet -> ValDelta a)
+vdIf f = \(BoolJet b db) -> let a  = f b
+                                da = case db of
+                                        NotVal -> changes a (f (patch b db))
+                                        NoChange -> noPatch
+                            in
+                                bundleVD (a,da)
+                            
 
 zIf :: (Patchable a, Patchable b) => ZDExpr (a -> ZBool) -> ZDExpr b -> ZDExpr b -> ZDExpr (a -> b)
 zIf = 
