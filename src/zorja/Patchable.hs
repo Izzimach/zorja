@@ -7,6 +7,7 @@
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
@@ -24,15 +25,15 @@ module Zorja.Patchable (
     ILCDelta,
     ValDelta,
     ValDeltaBundle,
+    ValDeltaMap,
     bundleVD,
     unbundleVD,
     patchVD,
-    mapVD,
-    autoPatch,
+    liftVD,
+    lowerVD,
+    valDelta,
     SelfDelta,
-    Jet1(..),
-    bundleJet,
-    unbundleJet,
+    Jet(..),
     valueToDelta,
     deltaToValue,
     SelfPatchable(..),
@@ -57,9 +58,6 @@ import Control.Applicative
 --  make changes to @a@ and produce a new value: @patch a (ILCDelta a) = a'@
 --  ILC in this case is "Incremental Lambda Calculus"
 type family ILCDelta a = da | da -> a
-
--- | unit is it's own ILC delta
-type instance (ILCDelta ()) = ()
 
 
 -- | Class for combining 'ILCDelta' values.
@@ -139,40 +137,77 @@ class ValDeltaBundle a where
     => ValDelta a -> (a, ILCDelta a)
   unbundleVD = unbundleVDGeneric
 
-  -- | patch the ValDelta 'in-place'. By default this runs @unbundleVD@ and @patch@,
-  --   but some data representations may have a faster implementation.
+
   patchVD :: (Patchable a) => ValDelta a -> a
   patchVD = (uncurry patch) . unbundleVD
 
+class (Patchable a,ValDeltaBundle a) => ValDeltaMap a where
+  vdMap :: (Patchable b, ValDeltaBundle b) => (a -> b) -> ValDelta a -> ValDelta b
+  vdMap f v = let (a,da) = unbundleVD v
+                  b = (f a)
+                  b' = f (patch a da)
+                  db = changes b b'
+              in bundleVD (b,db)
 
--- | Given a function from 'a -> b' this will generate a function 'ValDelta a -> ValDelta b'.
---   It won't be efficient but hopefully it will be correct
-mapVD :: (ValDeltaBundle a, ValDeltaBundle b, Patchable a, Patchable b)
+
+-- | Given a function from 'a -> b' this will generate a function 'ValDelta a -> ValDelta b'
+--   that applies the function to BOTH the original and patched value.
+--   It won't be efficient but hopefully it will be correct.
+--   If you want to modify the patched value while leaving the original intact, you can
+--   use 'valueLens'
+liftVD :: (ValDeltaBundle a, ValDeltaBundle b, Patchable a, Patchable b)
     => (a -> b) -> (ValDelta a) -> (ValDelta b)
-mapVD f = \vda -> let (a,da) = unbundleVD vda
-                      b = f a
-                      b' = f (patch a da)
-                      db = changes b b'
-                  in bundleVD (b,db)
+liftVD f = \vda ->  let (a,da) = unbundleVD vda
+                        b = f a
+                        b' = f (patch a da)
+                        db = changes b b'
+                    in bundleVD (b,db)
+
 
 -- | Given a function from 'ValDelta a -> ValDelta b' this converts it to 'a -> b'
-autoPatch :: (ValDeltaBundle a, ValDeltaBundle b, Patchable a, Patchable b)
+lowerVD :: (ValDeltaBundle a, ValDeltaBundle b, Patchable a, Patchable b)
     => (ValDelta a -> ValDelta b) -> (a -> b)
-autoPatch df = \a -> patchVD $ df $ bundleVD (a,noPatch)
+lowerVD df = \a -> patchVD $ df $ bundleVD (a,noPatch)
+
+
+--
+-- | A lens to modify the patched value in a 'ValDelta', updating the delta value but
+--   preserving the original value. Use as a lens, for example @v ^. valueLens@ gets
+--   the patched value of @v@
+valDelta :: forall f a. (Functor f, Patchable a, ValDeltaBundle a) =>
+    (a -> f a) -> ValDelta a -> f (ValDelta a)
+valDelta f vd = let (a,da) = unbundleVD vd
+                    a' = f (patch a da)
+                    bundleUp = \x -> bundleVD (a, changes a x)
+                in
+                    fmap bundleUp a'
+
+--
+-- | Patching for ()
+--
+type instance (ILCDelta ()) = ()
+type instance ValDelta () = ()
+
+instance Patchable () where
+    patch () () = ()
+    changes () () = ()
+
+instance PatchInstance () where
+    -- This is what I'm spending my precious life on.
+    () <^< () = ()
+    noPatch = ()
+
+instance ValDeltaBundle () where
+  bundleVD ((), ()) = ()
+  unbundleVD () = ((),())
+
 
 -- | The default @ValDelta@ is just a product. Note that other
 --   structures may have a different definition for @valDelta@.
-data Jet1 a = Jet1 a (ILCDelta a)
+data Jet a = Jet a (ILCDelta a)
 
-
-bundleJet :: (a, ILCDelta a) -> Jet1 a
-bundleJet (a,da) = Jet1 a da
-
-unbundleJet :: Jet1 a -> (a, ILCDelta a)
-unbundleJet (Jet1 a da) = (a,da)
-
-deriving instance (Eq a, Eq (ILCDelta a)) => Eq (Jet1 a)
-deriving instance (Show a, Show (ILCDelta a)) => Show (Jet1 a)
+deriving instance (Eq a, Eq (ILCDelta a)) => Eq (Jet a)
+deriving instance (Show a, Show (ILCDelta a)) => Show (Jet a)
 
 
 --
@@ -218,7 +253,6 @@ instance (Patchable a, Patchable b) => Patchable (a -> b) where
 --   each component independently, which may not be what
 --   you want.
 --
-
 type instance ILCDelta (a,b) = (ILCDelta a, ILCDelta b)
 
 instance (PatchInstance a, PatchInstance b) => PatchInstance (a,b) where
@@ -230,14 +264,17 @@ instance (Patchable a, Patchable b) => Patchable (a,b) where
     changes (a0,b0) (a1,b1) = (changes a0 a1, changes b0 b1)
 
 
-
+--
+-- | Patching for 'Maybe'
+--
 type instance ILCDelta (Maybe a) = Maybe (ILCDelta a)
 type instance ValDelta (Maybe a) = Maybe (ValDelta a)
 
--- | Here we use 'Maybe' as a Sum type which can switch between 'Nothing' and @'Just' x@.
+-- | Note we define 'Maybe' as a sum type which can switch between 'Nothing' and @'Just' x@.
 --   Another interpretation is that 'Nothing' means an empty patch or no changes. For this sort
---   of thing use 'ReplaceOnly'
-
+--   of thing use 'ReplaceOnly'. Also note that normally you wrap this in 'ReplaceableVal'
+--   to avoid value/delta mismatch errors.
+--
 instance (Patchable a) => Patchable (Maybe a) where
     patch Nothing Nothing = Nothing
     patch (Just x) (Just dx) = Just (patch x dx)
@@ -269,23 +306,32 @@ instance (ValDeltaBundle a) => ValDeltaBundle (Maybe a) where
 --
 
 data BoolD = BoolD
-data BoolVD = BoolVD Bool BoolD
+    deriving (Eq, Show)
+newtype BoolVD = BoolVD Bool
+    deriving (Eq, Show)
 
+-- | There is no delta for raw 'Bool', you need to wrap it in 'ReplacableVal' to get
+--   proper handling of sum types.
 type instance ILCDelta Bool = BoolD
+
+-- | You should use 'ReplaceableVal (Bool a)' and it's ValDelta, not the raw 'Bool' type
 type instance ValDelta Bool = BoolVD
 
+-- | Patchable 'Bool' does nothing, wrap 'Bool' in 'ReplaceableVal' to get what you would
+--   expect from a sum type.
 instance Patchable Bool where
     patch x _ = x
+
     changes _ _ = BoolD
 
 instance PatchInstance BoolD where
-    BoolD <^< BoolD = BoolD
+    _ <^< _ = BoolD
 
     noPatch = BoolD
 
 instance ValDeltaBundle Bool where
-    bundleVD (x,_) = BoolVD x BoolD
-    unbundleVD (BoolVD x BoolD) = (x,BoolD)
+    bundleVD (x,BoolD) = BoolVD x
+    unbundleVD (BoolVD x) = (x,BoolD)
 
 --
 -- | If a is a group, we can generate a Patchable type where the 

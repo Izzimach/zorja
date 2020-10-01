@@ -15,7 +15,7 @@ module Zorja.ChangesMonad where
 import Control.Monad.State
 
 import Zorja.Patchable
-import Zorja.Jet
+import Zorja.Primitives
 
 --
 -- State monad for a Patchable data type, using @changes@ to find change
@@ -27,8 +27,7 @@ import Zorja.Jet
 -- takes a @PatchedJet s@ instead of @s@ as the monad state.
 --
 
-data ChangesMonad s m a = ChangesMonad { runCM :: (PatchedJet s) -> m (a, PatchedJet s) }
-
+data ChangesMonad s m a = ChangesMonad { runCM :: (ValDelta s) -> m (a, ValDelta s) }
 instance (Functor m) => Functor (ChangesMonad s m) where
   fmap f pm = ChangesMonad (\pj -> let mapfst = \(a,b) -> (f a, b)
                                    in fmap mapfst (runCM pm pj))
@@ -46,15 +45,15 @@ instance (Monad m) => Monad (ChangesMonad s m) where
   a >>= b   = ChangesMonad (\pj -> do (a1,pj1) <- runCM a pj
                                       runCM (b a1) pj1)
 
-instance (Monad m, Patchable s) => MonadState s (ChangesMonad s m) where
-  get = ChangesMonad (\pj -> return (patchedval pj, pj))
+instance (Monad m, Patchable s, ValDeltaBundle s) => MonadState s (ChangesMonad s m) where
+  get = ChangesMonad (\pj -> return (patchVD pj, pj))
   --
   -- in the function @s@ is the new state sent by put, and pj is the
   -- current state from the upstream monad.
   put = (\new_s -> ChangesMonad
-          (\pj -> let old_history = history pj
-                      old_s       = patchedval pj
-                      new_history = old_history <> changes (patchedval pj) new_s
-                      new_pj = PatchedJet new_s new_history
+          (\pj -> let (_,old_history) = unbundleVD pj
+                      old_s       = patchVD pj
+                      new_history = old_history <^< changes (patchVD pj) new_s
+                      new_pj = bundleVD (new_s, new_history)
                   in return ((), new_pj)))
 

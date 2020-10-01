@@ -17,7 +17,7 @@ import Zorja.Primitives
 import Subtests.PatchGen
 import Subtests.Primitives
 import Subtests.ListX
-import Subtests.ZJIntMap
+--import Subtests.ZJIntMap
 import Subtests.Cofree
 
 -- some basic generators

@@ -17,7 +17,7 @@ module Zorja.Collections.MagicBag (
     MagicDeltaBag (..),
     empty,
     singleton,
-    singletonNeg,
+    singletonMinus,
     insert,
     delete,
     sumBags,
@@ -70,8 +70,8 @@ singleton :: (Ord a, AsMagicBag p) => a -> p a
 singleton x = fromList [x]
 
 -- | Create a MagicBag with a single negative element
-singletonNeg :: (Ord a, AsMagicBag p) => a -> p a
-singletonNeg x = delete x $ empty
+singletonMinus :: (Ord a, AsMagicBag p) => a -> p a
+singletonMinus x = delete x $ empty
 
 -- | Returns true if the value @a@ /has a count greater than zero/
 member :: (Ord a, AsMagicBag p) => a -> p a -> Bool
@@ -80,12 +80,13 @@ member p a = case (lookup p a) of
                        Just v  -> (v > 0)
 
 
--- | A MagicBag is a Set where each element has an associated non-zero count
+-- | A 'MagicBag' is a 'Set' where each element has an associated non-zero count
 newtype MagicBag a = MagicBag { unMagicBag :: Map a MagicBagCount }
     deriving (Eq, Show) via (Map a MagicBagCount)
 
 -- | MagicBags are their own deltas
 type instance ILCDelta (MagicBag a) = MagicBag a
+type instance ValDelta (MagicBag a) = MagicDeltaBag a
 
 instance Ord a => Semigroup (MagicBag a) where
     (<>) = sumBags
@@ -96,10 +97,10 @@ instance Ord a => Monoid (MagicBag a) where
     mconcat = foldl' sumBags empty
 
 magicBagAlter :: MagicBagCount -> Maybe MagicBagCount -> Maybe MagicBagCount
-magicBagAlter x my = let y = fromMaybe 0 my
-                in case (x + y) of
-                       0 -> Nothing
-                       n -> Just n
+magicBagAlter x my =    let y = fromMaybe 0 my
+                        in case (x + y) of
+                            0 -> Nothing
+                            n -> Just n
 
 mergeMagicBags :: (Ord a)
                 => (MagicBagCount -> MagicBagCount -> MagicBagCount) 
@@ -167,7 +168,7 @@ mergeDeltaBags mf (MagicDeltaBag a) (MagicDeltaBag b) = MagicDeltaBag $ merge f1
 
 instance AsMagicBag MagicDeltaBag where
     -- lookup returns the Patched count
-    lookup x (MagicDeltaBag a) = fmap (\(x,y) -> x + y) $ Map.lookup x a
+    lookup x (MagicDeltaBag a) = fmap (\(b,c) -> b + c) $ Map.lookup x a
     insert x (MagicDeltaBag a) = MagicDeltaBag $ Map.alter (magicDeltaBagAlter 1) x a
     delete x (MagicDeltaBag a) = MagicDeltaBag $ Map.alter (magicDeltaBagAlter (-1)) x a
     -- creating a MagicDeltaBag from a list is equivalent to inserting all the elements into an empty bag.
@@ -175,13 +176,14 @@ instance AsMagicBag MagicDeltaBag where
     maxBags a b = mergeDeltaBags maxDeltaMerge a b
     minBags a b = mergeDeltaBags minDeltaMerge a b
     sumBags a b = mergeDeltaBags sumDeltaMerge a b
+    map f (MagicDeltaBag a) = MagicDeltaBag $ Map.mapKeysWith (\(x,y) (c,d) -> (x+c,y+d)) f a
+    negate (MagicDeltaBag a) = MagicDeltaBag $ Map.map (\(c,d) -> (Prelude.negate c, Prelude.negate d)) a
             
 
 
 -- | Combining two MagicBags into a MagicDeltaBag
-instance (Ord a) => T2Combine (MagicBag a) (MagicBag a) where
-    type T2Combined (MagicBag a) (MagicBag a) = MagicDeltaBag a
-    t2Combine (MagicBag as, MagicBag bs) = MagicDeltaBag $ merge f1 f2 fb as bs
+instance (Ord a) => ValDeltaBundle (MagicBag a) where
+    bundleVD (MagicBag as, MagicBag bs) = MagicDeltaBag $ merge f1 f2 fb as bs
         where
             f1 :: (Applicative f) => WhenMissing f k MagicBagCount (MagicBagCount,MagicBagCount)
             f1 = mapMissing (\k x -> (x,0 :: MagicBagCount))
@@ -189,7 +191,7 @@ instance (Ord a) => T2Combine (MagicBag a) (MagicBag a) where
             f2 = mapMissing (\k x -> (0,x))
             fb :: (Applicative f) => WhenMatched f k MagicBagCount MagicBagCount  (MagicBagCount, MagicBagCount)
             fb = zipWithMatched (\k x y -> (x,y))
-    t2Sunder (MagicDeltaBag ab) =
+    unbundleVD (MagicDeltaBag ab) =
         let a = Map.mapMaybe (justNonzero . fst) ab
             b = Map.mapMaybe (justNonzero . snd) ab
         in (MagicBag a, MagicBag b)
@@ -213,6 +215,7 @@ moreInsert :: (Ord a) => a -> DeltaSet a -> DeltaSet a
 moreInsert v (DeltaSet i d) = DeltaSet (Set.insert v i) (Set.delete v d)
 
 type instance ILCDelta (Set a) = DeltaSet a
+type instance ValDelta (Set a) = DSet a
 
 instance (Ord a) => Semigroup (DeltaSet a) where
     (DeltaSet i1 d1) <> (DeltaSet i2 d2) =
@@ -226,12 +229,11 @@ instance (Ord a) => Monoid (DeltaSet a) where
 
 data DSet a = DSet (Set a) (DeltaSet a)
 
-instance T2Combine (Set a) (DeltaSet a) where
-    type T2Combined (Set a) (DeltaSet a) = DSet a
-    t2Combine (a,da) = DSet a da
-    t2Sunder (DSet a da) = (a,da)
+instance ValDeltaBundle (Set a) where
+    bundleVD (a,da) = DSet a da
+    unbundleVD (DSet a da) = (a,da)
 
--- | Convert a 'MagicDeltaBag' to a 'Set' and 'DeltaSet'
+-- | Convert a 'MagicDeltaBag' with element counts to a 'DSet' which is just the elements
 distillBag :: (Ord a) => MagicDeltaBag a -> DSet a
 distillBag (MagicDeltaBag m) = Map.foldrWithKey distillElement (DSet mempty mempty) m
     where

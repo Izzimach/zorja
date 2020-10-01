@@ -50,7 +50,6 @@ library
                        Zorja.ZHOAS,
                        Zorja.FunctorDExpr,
                        Zorja.Collections.ListX,
-                       Zorja.Collections.ZJIntMap,
                        Zorja.Collections.Cofree
 
 test-suite zorja-test
@@ -63,11 +62,9 @@ test-suite zorja-test
                        Zorja.ZHOAS,
                        Zorja.FunctorDExpr,
                        Zorja.Collections.ListX,
-                       Zorja.Collections.ZJIntMap,
                        Zorja.Collections.Cofree,
                        Subtests.PatchGen,
                        Subtests.Primitives,
                        Subtests.ListX,
-                       Subtests.ZJIntMap,
                        Subtests.Cofree
                       

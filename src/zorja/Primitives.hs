@@ -23,31 +23,54 @@ module Zorja.Primitives
         -- $replaceOnly
         ReplaceOnly(..),
         Replacing(..),
+        ReplaceValDelta(..),
+
         -- * A number where the delta is of the same numeric type
         --
         -- $diffNum
         DiffNum(..),
+        DiffNumValDelta(..),
 
         ReplaceableVal(..),
         ReplaceableDelta(..),
         ReplaceableValDelta(..),
         PatchReplaceable,
+        replaceable,
         replaceableChanges,
         safeBundle,
         valDeltaNoPatch,
+        rcase,
+        tIf,
+        tBranch,
 
-        ifILC
+
+        ReplaceableMaybe(..),
+        liftCRM,
+        toMaybeCRM,
+        fromMaybeCRM,
+        replaceableMaybe,
+        unfurl,
+        unfurlVal,
+        unfurlAdd,
+        unfurlDelete,
+        CollapseReplaceableMaybe,
+        collapse,
     )
     where
 
+import Prelude
+
 import GHC.Generics
 
+import Control.Applicative
 import Control.Lens.Wrapped
+import Control.Lens.Prism
 
 import Data.Functor.Identity
 import Data.Semigroup
 import Data.Maybe
 import Data.Hashable
+
 
 
 import Zorja.Patchable
@@ -79,11 +102,17 @@ newtype Replacing a = Replacing (Maybe a)
     deriving (Functor, Applicative) via Maybe
     deriving (Semigroup, Monoid) via (Maybe a)
 
+data ReplaceValDelta a = ReplaceValDelta a (Replacing a)
+    deriving (Eq, Show, Generic)
+
 type instance ILCDelta (ReplaceOnly a) = Replacing a
-type instance ValDelta (ReplaceOnly a) = (ReplaceOnly a, Replacing a)
+type instance ValDelta (ReplaceOnly a) = ReplaceValDelta a
 
 instance Wrapped (ReplaceOnly a) where
     type Unwrapped (ReplaceOnly a) = a
+
+instance (t ~ ReplaceOnly a) => Rewrapped (ReplaceOnly a) t
+
 
 instance (Eq a) => Patchable (ReplaceOnly a) where
     patch (ReplaceOnly a) (Replacing da) = ReplaceOnly $ fromMaybe a da
@@ -102,25 +131,31 @@ instance PatchInstance (Replacing a) where
     noPatch = Replacing Nothing
     
 instance ValDeltaBundle (ReplaceOnly a) where
-    bundleVD = id
-    unbundleVD = id
+    bundleVD (ReplaceOnly x,dx) = ReplaceValDelta x dx
+    unbundleVD (ReplaceValDelta x dx) = (ReplaceOnly x, dx)
 
 --
--- wrapper around a value that can change/replace whole values;
--- used for sum types mostly but useful for recursive types where
--- simple
---
-
-newtype ReplaceableVal a = ReplaceableVal a
+-- | A wrapper around a value that can change/replace whole values;
+-- used for sum types since the normal delta of sum types doesn't let you
+-- switch constructors.
+newtype ReplaceableVal a = ReplaceableVal { unReplaceableVal :: a }
   deriving (Generic, Eq, Show)
+  
+data ReplaceableDelta a = ReplaceablePatch (ILCDelta a)
+                        | ReplaceableNew a
+                        | ReplaceableNoPatch
+
+data ReplaceableValDelta a where
+    -- | normal value + patch that we usually expect
+    ReplaceableValDelta :: ValDelta a -> ReplaceableValDelta a
+    -- | replace one value with another
+    ReplaceableValues :: a -> a -> ReplaceableValDelta a
+
 
 instance Wrapped (ReplaceableVal a) where
     type Unwrapped (ReplaceableVal a) = a
     
-
-data ReplaceableDelta a = ReplaceablePatch (ILCDelta a)
-                        | ReplaceableNew a
-                        | ReplaceableNoPatch
+instance (t ~ ReplaceableVal a) => Rewrapped (ReplaceableVal a) t
 
 instance (Eq a, Eq (ILCDelta a)) => Eq (ReplaceableDelta a) where
     (ReplaceablePatch da) == (ReplaceablePatch da') = da == da'
@@ -133,15 +168,21 @@ instance (Show a, Show (ILCDelta a)) => Show (ReplaceableDelta a) where
     show (ReplaceableNew a) = "ReplaceableNew (" ++ show a ++ ")"
     show (ReplaceableNoPatch) = "ReplaceableNoPatch"
 
-data ReplaceableValDelta a where
-    ReplaceableValDelta :: ValDelta a -> ReplaceableValDelta a
-      -- ^ normal value + patch
-    ReplaceableValues :: a -> a -> ReplaceableValDelta a           -- ^ replace one value with another
+instance Functor ReplaceableVal where
+    fmap f (ReplaceableVal a) = ReplaceableVal (f a)
 
-instance Functor (ReplaceableValDelta) where
-    fmap f (ReplaceableValDelta v) = undefined
+-- | Access 'ReplaceableValDelta' via a lens
+replaceable :: forall f a. (Functor f, ValDeltaBundle a, PatchReplaceable a) =>
+    (a -> f a) -> ReplaceableValDelta a -> f (ReplaceableValDelta a)
+replaceable f vd = let (a, da) = unbundleVD vd
+                       a' = unReplaceableVal (patch a da)
+                       fa = (f a')
+                       -- kind of a mess, but sometimes the constructor will switch from ReplaceValDelta
+                       -- to ReplaceableValues and we have to handle this switch properly by
+                       -- using replaceableChanges instead of just rebundling the result
+                       rebundle = \x -> bundleVD (a, replaceableChanges (unReplaceableVal a) x)
+                   in fmap rebundle fa
 
-    fmap f (ReplaceableValues a a') = ReplaceableValues (f a) (f a')
 
 instance (Eq a, Eq (ValDelta a)) => Eq (ReplaceableValDelta a) where
     (ReplaceableValDelta da) == (ReplaceableValDelta da')  = (da == da')
@@ -187,6 +228,55 @@ instance (PatchReplaceable a, ValDeltaBundle a) => ValDeltaBundle (ReplaceableVa
                                          in (ReplaceableVal x, ReplaceablePatch dx)
     unbundleVD (ReplaceableValues x x') = (ReplaceableVal x, ReplaceableNew x')
 
+
+
+-- | Handle case statements in transformer functions.
+rcase :: (ValDeltaBundle a, ValDeltaBundle b, Patchable a, Patchable b) => 
+   (a -> b) -> ReplaceableValDelta a -> ValDelta b
+rcase f (ReplaceableValDelta vd) = let (a,da) = unbundleVD vd
+                                       a' = patch a da
+                                       b  = f a
+                                       b' = f a'
+                                   in bundleVD (b, changes b b')
+rcase f (ReplaceableValues a a') = let b = f a
+                                       b' = f a'
+                                       db = changes b b'
+                                   in bundleVD (b,db)
+
+rTest :: (Patchable a, ValDeltaBundle a) => (a -> Bool) -> ValDelta a -> ReplaceableValDelta Bool
+rTest f vd =
+    let (a,da) = unbundleVD vd
+        a' = patch a da
+        b = f a
+        b' = f a'
+    in bundleVD (ReplaceableVal b, replaceableChanges b b')
+
+-- | @tIf c f g x@ represents a ValDelta version of @if (t x) then (f x) else (g x)@
+tIf :: (Patchable a, Patchable b, ValDeltaBundle a, ValDeltaBundle b) =>
+    (a -> Bool) -> (a -> b) -> (a -> b) -> ValDelta a -> ValDelta b
+tIf c f g vd =
+    let test = rTest c vd
+    in tBranch (liftVD f) (liftVD g) test vd
+
+-- | Pick one of two functions from @ValDelta a -> Valdelta b@ based on a 'ReplaceableValDelta Bool' value.
+tBranch :: (Patchable b, ValDeltaBundle b) =>
+    (ValDelta a -> ValDelta b) -> 
+    (ValDelta a -> ValDelta b) -> 
+    ReplaceableValDelta Bool -> 
+    (ValDelta a -> ValDelta b)
+tBranch f g t vd =
+    case t of
+        (ReplaceableValDelta (BoolVD x)) -> pickFunc x $ vd
+        (ReplaceableValues x x')         -> let (b,db) = unbundleVD $ pickFunc x vd
+                                                (b',db') = unbundleVD $ pickFunc x' vd
+                                            in bundleVD (b, changes b (patch b' db'))
+    where
+        pickFunc b = if b then f else g
+        
+
+-- | Normally you don't use raw 'Maybe' as a value/delta type since as a sum type it
+--   can produce mismatch errors. Instead you will typically use @ReplaceableVal (Maybe a)@
+--   which is represented by the 'ReplaceableMaybe' newtype.
 instance (Patchable a, ValDeltaBundle a) => PatchReplaceable (Maybe a) where
   replaceableChanges Nothing (Just x) = ReplaceableNew (Just x)
   replaceableChanges (Just _) Nothing = ReplaceableNew Nothing
@@ -207,56 +297,86 @@ instance PatchReplaceable Bool where
     replaceableChanges _ b         = ReplaceableNew b
     
     safeBundle :: (Bool, BoolD) -> BoolVD
-    safeBundle (v,d) = BoolVD v d
+    safeBundle (v,BoolD) = BoolVD v
 
     valDeltaNoPatch :: Bool -> BoolVD
-    valDeltaNoPatch v = BoolVD v BoolD
+    valDeltaNoPatch v = BoolVD v
 
 
+newtype ReplaceableMaybe a = ReplaceableMaybe (ReplaceableValDelta (Maybe a))
+    deriving (Generic)
+
+instance Wrapped (ReplaceableMaybe a) where
+    type Unwrapped (ReplaceableMaybe a) = ReplaceableValDelta (Maybe a)
+    
+instance (t ~ ReplaceableMaybe a) => Rewrapped (ReplaceableMaybe a) t
+
+instance (Show a, Show (ValDelta a), Show (ReplaceableValDelta a)) => Show (ReplaceableMaybe a) where
+    show (ReplaceableMaybe x) = "ReplaceableMaybe (" ++ show x ++ ")"
+
+class CollapseReplaceableMaybe a where
+    collapse :: ReplaceableMaybe a -> ValDelta a
+    unfurl :: ValDelta a -> ReplaceableMaybe a
+
+instance (Monoid a, Eq a) => CollapseReplaceableMaybe (ReplaceOnly a) where
+    collapse (ReplaceableMaybe vd) = case vd of
+        ReplaceableValDelta Nothing -> bundleVD (mempty, noPatch)
+        ReplaceableValDelta (Just vda) -> vda
+        ReplaceableValues a a'         -> let x = fromMaybe mempty a
+                                              x' = fromMaybe mempty a'
+                                          in bundleVD (x, changes x x')
+    unfurl v = ReplaceableMaybe $
+                 let (ReplaceOnly r,Replacing dr) = unbundleVD v
+                 in case dr of
+                   Nothing -> ReplaceableValDelta $ Just v
+                   Just da -> case (nullEmpty r, nullEmpty da) of
+                                (Nothing, Nothing) -> ReplaceableValDelta Nothing
+                                (Just _, Just _)   -> ReplaceableValDelta (Just v)
+                                -- fallback is if one or the other is Nothing, in which
+                                -- case we need to use ReplaceableValues
+                                (x, x')            -> ReplaceableValues (fmap ReplaceOnly x) (fmap ReplaceOnly x')
+        where
+            nullEmpty x = if (x == mempty) then Nothing else Just x
 
 
---
--- Safe patchable with Generics
---
-{-
-class PatchReplaceableG x where
-  replaceableChangesG :: x p -> x p -> (ReplaceableDelta rx)
+liftCRM :: (ValDeltaBundle a, Patchable a, ValDeltaBundle b, Patchable b) =>
+    (ValDelta a -> ValDelta b) -> ReplaceableMaybe a -> ReplaceableMaybe b
+liftCRM fvd =
+    \(ReplaceableMaybe arm) -> case arm of
+        ReplaceableValDelta va -> ReplaceableMaybe $ ReplaceableValDelta (fmap fvd va)
+        ReplaceableValues a a' -> let f = lowerVD fvd 
+                                  in ReplaceableMaybe $ ReplaceableValues (fmap f a) (fmap f a')
 
-instance (PatchReplaceable x) => PatchReplaceableG (K1 a x)where
-  replaceableChangesG (K1 x) (K1 x') = case (replaceableChanges x x') of
-                                           ReplaceablePatch dx -> ReplaceablePatch $ to (K1 dx)
-                                           ReplaceableNew   x2 -> ReplaceableNew $ to (K1 x2)
-                                           ReplaceableNoPatch  -> ReplaceableNoPatch
+toMaybeCRM :: (Eq a, Eq (ValDelta a)) => ReplaceableMaybe a -> Maybe (ReplaceableMaybe a)
+toMaybeCRM a@(ReplaceableMaybe x)
+    | x == ReplaceableValues Nothing Nothing     = Nothing
+    | otherwise                                  = Just a
 
---instance (PatchReplaceableG x, PatchReplaceableG y) => PatchReplaceableG (x :*: y) where
---    replaceableChangesG (x :*: y) (x' :*: y') = _f (replaceableChangesG x x') (replaceableChangesG y y')
-
-instance (PatchReplaceableG x, PatchReplaceableG y) => PatchReplaceableG (x :+: y) where
-    replaceableChangesG (L1 x) (L1 x') = case (replaceableChangesG x x') of
-                                           ReplaceablePatch dx -> ReplaceablePatch $ L1 (_l dx)
-                                           ReplaceableNew   x2 -> ReplaceableNew (L1 x2)
-                                           ReplaceableNoPatch  -> ReplaceableNoPatch
+fromMaybeCRM :: Maybe (ReplaceableMaybe a) -> ReplaceableMaybe a
+fromMaybeCRM Nothing = ReplaceableMaybe (ReplaceableValues Nothing Nothing)
+fromMaybeCRM (Just v) = v
 
 
-class SafeBundleG x dx v where
-  safeBundleG :: (x :*: dx) p -> v p
-  valDeltaNoPatchG :: x p -> v p
+-- | Access 'ReplaceableMaybe' via a lens. This picks out the @Maybe a@ inside.
+--   If you want to work with @a@ instead, add a '_Just' to the end of it.
+replaceableMaybe :: forall f a. (Functor f, Patchable a, ValDeltaBundle a) =>
+    (Maybe a -> f (Maybe a)) -> ReplaceableMaybe a -> f (ReplaceableMaybe a)
+replaceableMaybe = _Wrapped . replaceable
 
-instance (SafePatchable x, rx ~ ReplaceableDelta x) => SafePatchableG (K1 a x) (K1 x rx) where
-  safeChangesG (K1 x) (K1 x') = K1 $ safeChanges x x'
+-- | Convert a single value into a 'ReplaceableMaybe' that represents a value with an empty ('noPatch') delta
+unfurlVal :: (ValDeltaBundle a, Patchable a) => a -> ReplaceableMaybe a
+unfurlVal a = ReplaceableMaybe $ ReplaceableValDelta $ Just (bundleVD (a,noPatch))
 
-instance (SafePatchableG (x) x', SafePatchableG (y) y') => SafePatchableG ((x :*: y)) (x' :*: y') where
-    safeChangesG (x :*: y) (x' :*: y') = (safeChangesG x x') :*: (safeChangesG y y')
+-- | Convert a single value into a 'ReplaceableMaybe' that represents adding a value
+unfurlAdd :: a -> ReplaceableMaybe a
+unfurlAdd a = ReplaceableMaybe $ ReplaceableValues Nothing (Just a)
+             
+-- | Convert a single value into a 'ReplaceableMaybe' that represents deleting a value
+unfurlDelete :: a -> ReplaceableMaybe a
+unfurlDelete a = ReplaceableMaybe $ ReplaceableValues (Just a) Nothing
+             
 
-instance (SafePatchableG (x p) (rx p), SafePatchableG (y p) (rx p), rx ~ ReplaceableDelta (x :+: y)) => SafePatchableG (x :+: y) rx where
-    safeChangesG (L1 x) (L1 x') = L1 $ safeChangesG x x'
-    safeChangesG (R1 y) (R1 y') = R1 $ safeChangesG y y'
-    safeChangesG (L1 x) (R1 y)  = L1 $ ReplaceableNew (R1 y)
 
-instance (SafePatchable x, dx ~ ILCDelta x, ValDelta x ~ v) => SafeBundleG (K1 a x) (K1 a dx) (K1 a v) where
-  safeBundleG (K1 x :*: K1 dx) = K1 $ safeBundle (x, dx)
-  valDeltaNoPatchG (K1 x) = K1 $ valDeltaNoPatch x
--}
 -- $DiffNum
 --
 -- Difference Num's use the numeric difference as a delta. Really only works
@@ -265,11 +385,21 @@ instance (SafePatchable x, dx ~ ILCDelta x, ValDelta x ~ v) => SafeBundleG (K1 a
 -- not hold.
 
 -- | Base type for a difference num. A 'DiffNum' is its own delta: @ILCDelta (DiffNum a) = DiffNum a@
-newtype DiffNum a = DNum (Sum a)
+newtype DiffNum a = DNum a
     deriving (Eq, Show, Num, Ord, Semigroup, Monoid) via (Sum a)
     deriving (Functor, Applicative) via Identity
 
+data DiffNumValDelta a = DValDelta a a
+    deriving (Eq, Show, Ord)
+
+instance (Num a) => Semigroup (DiffNumValDelta a) where
+    (DValDelta a da) <> (DValDelta b db) = DValDelta (a + b) (da + db)
+
+instance (Num a) => Monoid (DiffNumValDelta a) where
+    mempty = DValDelta 0 0
+
 type instance ILCDelta (DiffNum a) = DiffNum a
+type instance ValDelta (DiffNum a) = DiffNumValDelta a
 
 instance (Num a) => Patchable (DiffNum a) where
     patch a da = a + da
@@ -277,25 +407,27 @@ instance (Num a) => Patchable (DiffNum a) where
 
 instance (Num a) => PatchInstance (DiffNum a) where
     da <^< db = da + db
-    noPatch = DNum mempty
+    noPatch = DNum 0
 
-wrapIf :: (Patchable a, ValDeltaBundle a) => (Bool -> a) -> ((ReplaceableValDelta Bool) -> ValDelta a)
-wrapIf f rv = 
-    case rv of
-        ReplaceableValues b b' -> let a = f b
-                                      a' = f b'
-                                      da = changes a a'
-                                  in
-                                      bundleVD (a,da)
-        ReplaceableValDelta (BoolVD b BoolD) -> bundleVD (f b, noPatch)
+instance (Num a) => ValDeltaBundle (DiffNum a) where
+    bundleVD (DNum a,DNum da) = DValDelta a da
+    unbundleVD (DValDelta a da) = (DNum a,DNum da)
 
-wrapTest :: (Patchable a, ValDeltaBundle a) => (a -> Bool) -> ValDelta a -> (ReplaceableValDelta Bool)
-wrapTest f va = let (a,da) = unbundleVD va
-                    b = f a
-                    b' = f (patch a da)
-                in
-                    bundleVD (ReplaceableVal b, replaceableChanges b b')
+instance (Eq a, Num a) => CollapseReplaceableMaybe (DiffNum a) where
+    collapse (ReplaceableMaybe v) = case v of
+        ReplaceableValDelta Nothing -> bundleVD (0, noPatch)
+        ReplaceableValDelta (Just vda) -> vda
+        ReplaceableValues a a'         -> let x = fromMaybe 0 a
+                                              x' = fromMaybe 0 a'
+                                          in bundleVD (x, changes x x')
 
-ifILC :: (Patchable a, Patchable b, ValDeltaBundle a, ValDeltaBundle b) =>
-    (a -> Bool) -> (Bool -> b) -> (ValDelta a) -> (ValDelta b)
-ifILC b f = (wrapIf f) . (wrapTest b)  
+    unfurl (DValDelta a da) = ReplaceableMaybe $
+                      let x = nullZero (DNum a)
+                          dx = nullZero (DNum da)
+                      in case (x,dx) of
+                        (Nothing, Nothing) -> ReplaceableValDelta Nothing
+                        (Just v, Just dv) -> ReplaceableValDelta $ Just (bundleVD (v,dv))
+                        (_,_)             -> ReplaceableValues x dx
+        where
+            nullZero x = if (x == 0) then Nothing else Just x
+

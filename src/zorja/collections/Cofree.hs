@@ -14,9 +14,9 @@
 
 module Zorja.Collections.Cofree (
     CofD(..),
-    CofDD(..),
-    coalgCofreeFDE,
-    foldMapCofreeFDE
+--    CofDD(..),
+    --coalgCofreeFDE,
+    --foldMapCofreeFDE
     ) where
     
 import Data.Functor.Foldable
@@ -35,6 +35,7 @@ import Zorja.Collections.ListX
 -- | A version of 'Cofree' that can be used with 'FunctorDExpr'
 data CofD fb fa a = (fa a) :<< (fb (CofD fb fa) a)
 
+{-
 -- | The 'ILCDelta' of 'CofD'
 data CofDD fb fa a = (FunctorDelta fa a) :<# (FunctorDelta (fb (CofD fb fa)) a)
 
@@ -204,3 +205,4 @@ testTreeFDE = FDE testTree testTreeD
 
 testTreeZD :: ZDExpr (CofD (ListX) ReplaceOnly (Sum Int))
 testTreeZD = fromFDE $ testTreeFDE
+-}

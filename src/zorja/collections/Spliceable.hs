@@ -1,4 +1,6 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingVia #-}
+{-# LANGUAGe FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -17,10 +19,19 @@ and the new value to splice into that range.
 
 -}
 
-module Zorja.Collections.Spliceable where
+module Zorja.Collections.Spliceable
+    (
+        SplicedList(..),
+        Splices(..),
+        SplicedListVD(..),
+        applySplice,
+        rmToSplice
+    ) where
+
+import GHC.Generics
 
 import Zorja.Patchable
-import Zorja.ZHOAS
+import Zorja.Primitives
 
 import Data.Monoid
 import Data.Functor.Foldable
@@ -30,132 +41,76 @@ import qualified Data.Text as T
 
 import qualified Data.Vector as V
 
---
--- | a splice action has a (start,end) range and the new value
--- | to replace what was in that range. The length of the
--- | new data may not be (end-start) in which case
--- | the splice result will have a different length.
---
+newtype SplicedList a = SplicedList [a]
+    deriving (Eq, Show, Generic)
 
-data SpliceAction a = SPLA
-    {
-        start :: Integer,
-        length :: Integer,
-        newChunk :: a
-    }
-    deriving (Eq, Show)
+data Splices a =
+      SpliceBranch Int (Splices a) (Splices a)
+    | Insert Int [a]
+    | Delete Int
+    | Skip Int
+    | Replace Int [a]
 
-instance Functor SpliceAction where
-    fmap f (SPLA st len val) = SPLA st len (f val)
+spliceSize :: Splices a -> Int
+spliceSize (SpliceBranch i _ _) = i
+spliceSize (Insert i _) = i
+spliceSize (Delete i)   = i
+spliceSize (Skip i) = i
+spliceSize (Replace i _) = i
 
-mkSplice :: Integer -> Integer -> a -> SpliceAction a
-mkSplice s l n = SPLA s l n
+data SplicedListVD a = SplicedListVD [a] (Splices a)
 
-newtype SpliceList a = SPLS [SpliceAction a]
-    deriving (Eq, Show, Semigroup, Monoid) via ([SpliceAction a])
+type instance ILCDelta (SplicedList a) = Splices a
+type instance ValDelta (SplicedList a) = SplicedListVD a
 
+instance Semigroup (Splices a) where
+    (Insert i0 as)  <> (Insert i1 bs)  = Insert (i0+i1) (as ++ bs)
+    (Delete i0)     <> (Delete i1)     = Delete (i0+i1)
+    (Skip i0)       <> (Skip i1)       = Skip (i0+i1)
+    (Replace i0 as) <> (Replace i1 bs) = Replace (i0+i1) (as ++ bs)
+    x               <> y               = SpliceBranch (spliceSize x + spliceSize y) x y
 
-instance Functor SpliceList where
-    fmap f (SPLS as) = SPLS $ fmap (fmap f) as
+instance Monoid (Splices a) where
+    mempty = Skip 0
+                                       
+instance Semigroup (SplicedListVD a) where
+    (SplicedListVD a da) <> (SplicedListVD b db) = SplicedListVD (a <> b) (da <> db)
 
-fmapSpliceActions :: (SpliceAction a -> SpliceAction a) -> SpliceList a -> SpliceList a
-fmapSpliceActions f (SPLS as) = SPLS $ fmap f as
+instance Monoid (SplicedListVD a) where
+    mempty = SplicedListVD mempty mempty
 
-instance PatchInstance (SpliceList a) where
-    mergepatches da db = undefined
-    nopatch = SPLS []
+instance ValDeltaBundle (SplicedList a) where
+    bundleVD (SplicedList a, da) = SplicedListVD a da
+    unbundleVD (SplicedListVD a da) = (SplicedList a, da)
 
-class SpliceArray a where
-    deltaToSplice :: PatchDelta a -> SpliceList a
-    spliceToDelta :: SpliceList a -> PatchDelta a
-    chunkSize :: a -> Integer
-    spliceInChunk :: a -> SpliceAction a -> a
+applySplice :: SplicedListVD a -> [a]
+applySplice (SplicedListVD a da) = applySplice' a da
 
-shiftSplice :: Integer -> SpliceAction a -> SpliceAction a
-shiftSplice offset (SPLA s l n) = SPLA (s + offset) l n
+applySplice' :: [a] -> Splices a -> [a]
+applySplice' a da =
+    case da of
+        (SpliceBranch s l r) -> let ls = spliceSize l
+                                    la = take ls a
+                                    rb = drop ls a
+                                in (applySplice' la l) ++ (applySplice' rb r)
+        (Insert s as)        -> as ++ a
+        (Delete s)           -> []
+        (Skip s)             -> a
+        (Replace s as)       -> as
 
-concatSpliceDExpr :: forall a. (Patchable a, SpliceArray a, Semigroup a) => ZDExpr a -> ZDExpr a -> ZDExpr a
-concatSpliceDExpr l r =
-    let (tl,dtl) = zdEval l
-        (tr,dtr) = zdEval r
-        -- convert deltas to splice lists
-        p = Proxy :: Proxy a
-        spll = deltaToSplice @a dtl
-        splr = deltaToSplice @a dtr
-        leftoffset = chunkSize tl
-        -- adjust offsets of the right splice to take into account
-        -- the offset of the left chunk
-        adjsplr = fmapSpliceActions (shiftSplice (toInteger leftoffset)) splr
-    -- if we apply the left splices first, than the length of the
-    -- left chunk will change and the right splices will be wrong,
-    -- so instead we apply the right splices first which won't
-    -- effect the left splices
-    in ZDV (tl <> tr) (spliceToDelta @a (adjsplr <> spll))
-
-
---
--- | SpliceArray instance for Text
---
-instance SpliceArray T.Text where
-    deltaToSplice a = a
-    spliceToDelta a = a
-    chunkSize a = toInteger $ T.length a
-    spliceInChunk orig (SPLA s l n) =
-        let prefix = T.take (fromInteger s)       orig
-            suffix = T.drop (fromInteger (s + l)) orig
-        in T.concat [prefix, n, suffix]
-
-type instance PatchDelta T.Text = SpliceList T.Text
-
-instance Patchable T.Text where
-    patch a (SPLS da) = foldl spliceInChunk a da
-    changes a a' = -- punt for now, just replace it all
-        SPLS [SPLA 0 (chunkSize a) a']
-        
---
--- | SpliceArray instance for Data.Vector
--- |
--- | Note that we don't require @Patchable a@ since elements are not patched,
--- | they are just straight up replaced when splicing. An alternate version might support
--- | deltas on specific elements.
---
-instance SpliceArray (V.Vector a) where
-    deltaToSplice a = a
-    spliceToDelta a = a
-    chunkSize a = toInteger $ V.length a
-    spliceInChunk orig (SPLA s l n) =
-        let prefix = V.take (fromInteger s)       orig
-            suffix = V.drop (fromInteger (s + l)) orig
-        in V.concat [prefix, n, suffix]
-
-type instance PatchDelta (V.Vector a) = SpliceList (V.Vector a)
-
-instance (Eq a) => Patchable (V.Vector a) where
-    patch a (SPLS da) = foldl spliceInChunk a da
-    changes a a' = SPLS [SPLA 0 (chunkSize a) a'] -- not effiecient but technically correct
-
-
---
--- | Code to fold a tree into a SpliceArray, with deltas
--- So changes to the tree are transformed into splice actions on the folded
--- result.
---
-{-
-treeToSplice :: (SpliceArray a, Monoid a) => RoseTree a -> RoseTreeDelta a -> ZDExpr a
-treeToSplice t dt =
-    let txt = foldTree t
-        tsize = chunkSize txt
-    in case (unfix dt) of
-        NoChange -> SPLJ txt []
-        Replace b ->  let btxt = foldTree b
-                          splice = mkSplice 0 (toInteger tsize) btxt
-                      in SPLJ txt [splice]
-        LeafChange da -> SPLJ txt (deltaToSplice da)
-        BranchChange dl dr -> case (unfix t) of
-            (Leaf x) -> undefined
-            (Branch l r) ->
-                let lxd = treeToSplice l dl
-                    rxd = treeToSplice r dr
-                in concatSpliceDExpr lxd rxd
--}
-
+-- | Converts a 'ReplaceableMaybe' to a 'SplicedListVD' value. Since 'SplicedListVD' is a 'Monoid'
+--   this is useful for folding up things into a list. Since you can't fold up 'ReplaceableMaybe'
+--   you instead convert it to 'SplicedListVD' and fold that up, for example @foldMap rmToSplice mapOfRMs@
+rmToSplice :: (Patchable a, Eq (ILCDelta a), ValDeltaBundle a) => ReplaceableMaybe a -> SplicedListVD a
+rmToSplice (ReplaceableMaybe x) =
+    case x of
+        ReplaceableValDelta Nothing -> SplicedListVD [] (Skip 0)
+        ReplaceableValDelta (Just vd) -> let (a,da) = unbundleVD vd
+                                             da' = if (da == noPatch)
+                                                   then (Skip 1)
+                                                   else (Replace 1 [(patch a da)])
+                                         in SplicedListVD [a] da'
+        ReplaceableValues Nothing (Just a') -> SplicedListVD [] (Insert 1 [a'])
+        ReplaceableValues (Just a) Nothing  -> SplicedListVD [a] (Delete 1)
+        ReplaceableValues Nothing Nothing   -> SplicedListVD [] (Skip 0)
+        ReplaceableValues (Just a) (Just a') -> SplicedListVD [a] (Replace 1 [a'])

@@ -19,6 +19,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -29,16 +30,20 @@ module Blackboard where
 
 --import Data.Monoid (Sum(..))
 
-import Prelude ()
-import Control.Category.Constrained.Prelude
-import qualified Control.Category.Hask as Hask
+import Prelude
+--import Control.Category.Constrained.Prelude
+--import qualified Control.Category.Hask as Hask
 
-import Control.Monad.Constrained
+--import Control.Monad.Constrained
+--import Control.Arrow.Constrained
 
---import Control.Applicative
+import Control.Applicative
 import Control.Lens
 
+import Data.Proxy
+import Data.Monoid
 import Data.Hashable
+import Data.Kind
 import qualified Data.Map as Map
 
 import Hedgehog
@@ -57,174 +62,93 @@ import Zorja.Primitives
 --import Zorja.Collections.ZJIntMap
 --import Zorja.Collections.Cofree
 
---
--- recursive deltas
---
-{-
-zdAdd :: ZDExpr (DiffNum Integer -> DiffNum Integer -> DiffNum Integer)
-zdAdd = lam $ \za ->
-            lam $ \zb ->
-                let (a,da) = zdEval za
-                    (b,db) = zdEval zb
-                in
-                    ZDV (a + b) (da + db)
-
-zDownFixable :: ZDExpr (DiffNum Integer -> DiffNum Integer) -> ZDExpr (DiffNum Integer -> DiffNum Integer)
-zDownFixable zf = lam $ \zn ->
-                        let nminus1 = zdAdd `app` zn `app` (ZDV (-1) mempty)
-                            ift = zIf   (zLiftFunction $ \x -> ZBool (x <= 0)) -- predicate
-                                        (ZDV 0 mempty)                         -- then result
-                                        (zdAdd `app` zn `app` (zf `app` nminus1)) -- else result
-                        in
-                            ift `app` zn
-
-zDownFixed :: ZDExpr (DiffNum Integer -> DiffNum Integer)
-zDownFixed = (fix zDownFixable)
-
-
-instance (T2ZipCombine f1 f2, T2Combine a1 a2) => T2Combine (Cofree f1 a1) (Cofree f2 a2)  where
-    type T2Combined (Cofree f1 a1) (Cofree f2 a2) = Cofree (T2ZipCombined f1 f2) (T2Combined a1 a2)
-    t2Combine (a0 :< xs0, a1 :< xs1) = (t2Combine (a0, a1) ) :< (t2ZipCombine (xs0,xs1))
-    t2Sunder (a :< xs) = let (a0,a1) = t2Sunder a
-                             (xs0, xs1) = t2UnzipSunder xs
-                         in
-                             (a0 :< xs0, a1 :< xs1)
-
-instance (T2ZipCombine f1 f2, T2Combine a1 a2) => T2ZipCombine (CCTC.CofreeF f1 a1) (CCTC.CofreeF f2 a2) where
-    type T2ZipCombined (CCTC.CofreeF f1 a1) (CCTC.CofreeF f2 a2) = CCTC.CofreeF (T2ZipCombined f1 f2) (T2Combined a1 a2)
-    t2ZipCombine (a0 CCTC.:< xs0, a1 CCTC.:< xs1) = (t2Combine (a0,a1)) CCTC.:< (t2ZipCombine (xs0,xs1))
-    t2UnzipSunder (a CCTC.:< xs) = let (a0,a1) = t2Sunder a
-                                       (xs0, xs1) = t2UnzipSunder xs
-                                   in
-                                       (a0 CCTC.:< xs0, a1 CCTC.:< xs1)
--}
-
 -- | 'ZapList' is 'ZipList' with a 'Show1' instance so that 'show' works for @Cofree ZapList a@
 newtype ZapList a = ZapList [a]
   deriving (Show, Eq)
-  deriving (Hask.Functor, Show1) via []
+  deriving (Functor, Show1) via []
 
-instance Hask.Foldable ZapList where
-  foldMap fm (ZapList as) = Hask.foldMap fm as
+instance Foldable ZapList where
+  foldMap fm (ZapList as) = foldMap fm as
 
-instance Hask.Applicative ZapList where
+instance Applicative ZapList where
   pure x = ZapList [x]
   liftA2 f (ZapList a) (ZapList b) = ZapList (zipWith f a b)
 
 
-type ValDeltaCategory = ConstrainedCategory (->) ValDeltaBundle
-
-toValDeltaCategory :: (ValDeltaBundle a, ValDeltaBundle b) => (a -> b) -> ValDeltaCategory a b
-toValDeltaCategory = constrained
 
 
-{-
-instance T2ZipCombine ZapList ZapList where
-    type T2ZipCombined ZapList ZapList = ZapList
-    t2ZipCombine (ZapList as, ZapList bs) = ZapList $ fmap t2Combine $ zip as bs
-    t2UnzipSunder (ZapList xs) = let (as,bs) = unzip (fmap t2Sunder xs)
-                                 in (ZapList as, ZapList bs)
+insertRM :: (Ord k, Patchable a, ValDeltaBundle a) => 
+  k -> a -> Map.Map k (ReplaceableMaybe a) -> Map.Map k (ReplaceableMaybe a)
+insertRM k v m = 
+  let r = (fromMaybeCRM (Map.lookup k m))
+  in
+    Map.insert k (set replaceableMaybe (Just v) r) m
+
+lookupRM :: (Ord k, Patchable a, ValDeltaBundle a) =>
+  k -> Map.Map k (ReplaceableMaybe a) -> Maybe a
+lookupRM k m = let (ReplaceableMaybe v) = (fromMaybeCRM (Map.lookup k m))
+               in view replaceable v
+
+-- | Modify the post-delta value while leaving the original value unchanged.
+--   To change the original AND the delta, use 'Map.alter' with a 
+--   @ReplaceableMaybe a -> ReplaceableMaybe a@
+adjustRM :: (Ord k, Patchable a, ValDeltaBundle a) =>
+  (a -> a) -> k -> Map.Map k (ReplaceableMaybe a) -> Map.Map k (ReplaceableMaybe a)
+adjustRM f k m = let (ReplaceableMaybe v) = fromMaybeCRM (Map.lookup k m)
+                 in Map.insert k (ReplaceableMaybe $ (over replaceable (fmap f) v)) m
+             
+deleteRM :: (Ord k, ValDeltaBundle a) =>
+  k -> Map.Map k (ReplaceableMaybe a) -> Map.Map k (ReplaceableMaybe a)
+deleteRM k m =
+    case (Map.lookup k m) of
+        Nothing -> m
+        Just (ReplaceableMaybe v) ->
+            let v' = case v of
+                        (ReplaceableValDelta vd) -> let (a,_) = unbundleVD vd
+                                                    in ReplaceableValues a Nothing
+                        (ReplaceableValues a _) -> ReplaceableValues a Nothing
+            in
+              Map.insert k (ReplaceableMaybe v') m
+
+updateRM :: (Ord k, ValDeltaBundle a, Patchable a, Eq a, Eq (ValDelta a)) =>
+  (a -> Maybe a) -> k -> Map.Map k (ReplaceableMaybe a) -> Map.Map k (ReplaceableMaybe a)
+updateRM f k m = alterRM f' k m
+    where f' Nothing = Nothing
+          f' (Just x) = f x
+
+alterRM :: (Ord k, ValDeltaBundle a, Patchable a, Eq a, Eq (ValDelta a)) =>
+  (Maybe a -> Maybe a) -> k -> Map.Map k (ReplaceableMaybe a) -> Map.Map k (ReplaceableMaybe a)
+alterRM f k m = Map.alter f' k m
+    where f' = toMaybeCRM . (over replaceableMaybe f) . fromMaybeCRM
 
 
-instance T2Combine Integer Integer where
-    type T2Combined Integer Integer = (Integer,Integer)
-    t2Combine = id
-    t2Sunder  = id
--}
---
--- values for ghci fiddling
---
+x1 :: ValDelta (ReplaceOnly String)
+x1 = ReplaceValDelta "argh" (Replacing (Just "ack"))
 
-{-
-leaf :: ZapList a
-leaf = ZapList []
+x2 :: ReplaceableValDelta Bool
+x2 = ReplaceableValDelta $ BoolVD True
 
-val :: Cofree ZapList Integer
-val = 3 :< ZapList [4 :< leaf, 5 :< leaf]
+x3 :: [ReplaceableMaybe (DiffNum Integer)]
+x3 = (fmap (unfurlVal . DNum) [5,6]) ++   -- numbers that don't change
+     [ReplaceableMaybe $ ReplaceableValues (Just (DNum 4)) Nothing] ++    -- represents a deletion
+     [ReplaceableMaybe $ ReplaceableValDelta (Just (DValDelta 1 (-4)))] ++ -- a number that changes
+     (fmap (unfurlAdd . DNum) [1,2]) -- represents adds
 
-val2 :: Cofree ZapList Integer
-val2 = 10 :< ZapList [5 :< leaf, 2 :< leaf]
+x4 :: Map.Map Integer (ReplaceableMaybe (Thingy 'HKDValue))
+x4 = Map.fromList []
 
+x5 :: Bool -> DiffNum Integer
+x5 True = DNum 3
+x5 False = DNum 4
 
-listX :: Day (Cofree ZapList) (Cofree ZapList) (Integer,Integer)
-listX = Day val val2 (,)
--}
+-- | A transformer for 'DiffNum' that clamps to some value
+x6 :: Integer -> ValDelta (DiffNum Integer) -> ValDelta (DiffNum Integer)
+x6 clamp = tIf (< (DNum clamp))     -- test
+               (const (DNum clamp)) -- then
+               (id)             -- else
 
-
---
--- instances for Day
---
-
-{-testX :: TwoVal (Cofree ZapList) (Cofree ZapList) Integer
-testX = TwoVal ChooseOne val val2
-
-distTwoVal :: (Functor f, Distributive w, Distributive v) => f (TwoVal w v a) -> TwoVal w v (f a)
-distTwoVal x = TwoVal ChooseOne (distW x) (distV x)
-    where
-        distW :: (Functor f, Distributive w) => f (TwoVal w v a) -> w (f a)
-        distW x = distribute $ fmap (\(TwoVal c wa va) -> wa) x
-        distV :: (Functor f, Distributive v) => f (TwoVal w v a) -> v (f a)
-        distV x = distribute $ fmap (\(TwoVal c wa va) -> va) x
-
-traverseTwoVal :: (Applicative f, Functor w, Functor v, Distributive f) => TwoVal w v (f a) -> f (TwoVal w v a)
-traverseTwoVal (TwoVal c wfa vfa) = let fwa = distribute wfa
-                                        fva = distribute vfa
-                                    in
-                                        liftA2 (TwoVal ChooseOne) fwa fva
-
-addZapList :: (Num a) => ZapList a -> a
-addZapList (ZapList zs) = foldl (+) (fromIntegral 0) zs
-
-addCofree :: (Num a) => CCTC.CofreeF ZapList a a -> a
-addCofree (a CCTC.:< xs) = a + addZapList xs
-
-addTwofree :: (Num a) => TwoVal (Cofree ZapList) (Cofree ZapList) a -> a
-addTwofree x = undefined --_y x
-
-cataAdd :: Cofree ZapList Integer -> Integer
-cataAdd = cata addCofree
-
-zipTwo :: TwoVal (Cofree ZapList) (Cofree ZapList) Integer -> (T2Combined (Cofree ZapList Integer) (Cofree ZapList Integer))
-zipTwo x = cata vx x
-
-anaZipTwo :: TwoVal (Cofree ZapList) (Cofree ZapList) Integer -> (T2Combined (Cofree ZapList Integer) (Cofree ZapList Integer))
-anaZipTwo x = ana avx x
-
-avx :: TwoVal (Cofree ZapList) (Cofree ZapList) Integer -> CCTC.CofreeF ZapList (Integer,Integer) (TwoVal (Cofree ZapList) (Cofree ZapList) Integer)
-avx (TwoVal c (a :< ws) (b :< vs)) = (t2Combine (a,b)) CCTC.:< (liftA2 (TwoVal ChooseOne) ws vs)
-
-vx :: TwoValBase (Cofree ZapList) (Cofree ZapList) Integer ((T2Combined (Cofree ZapList Integer) (Cofree ZapList Integer)))
-   -> (T2Combined (Cofree ZapList Integer) (Cofree ZapList Integer))
-vx (TwoValBase (a CCTC.:< xs)) = (t2Combine a) :< xs
-
-vxx :: CCTC.CofreeF ZapList (Integer,Integer) a -> CCTC.CofreeF ZapList (Integer,Integer) a
-vxx (a CCTC.:< xs) = a CCTC.:< xs
-
-instance Num (Integer, Integer) where
-    (a0,b0) + (a1,b1) = (a0+a1,b0+b1)
-    fromInteger x = (x,x)
-
-foldTwo :: Cofree ZapList (Integer, Integer) -> (Integer, Integer)
-foldTwo x = cata addTwoInt x
-
-addTwoInt :: (Num a) => CCTC.CofreeF ZapList a a -> a
-addTwoInt (a CCTC.:< xs) = a + (foldl (+) (fromIntegral 0) xs)
-
-fadd :: TwoVal (Cofree ZapList) (Cofree ZapList) Integer -> (Integer, Integer)
-fadd x = (cata addTwoInt) . (cata vx) $ x
-    where
-        fx :: TwoValBase (Cofree ZapList) (Cofree ZapList) Integer (Integer,Integer) -> (Integer, Integer)
-        fx = undefined
-
--- zip up tree and cata it
-foldTestX :: TwoVal (Cofree ZapList) (Cofree ZapList) Integer -> (Integer, Integer)
-foldTestX = hylo addTwoInt avx
-
-
-genTree :: Gen a -> Gen (NonEmpty.NonEmpty a)
-genTree ga = Gen.nonEmpty (Range.linear 0 10) ga
-
--}
+x7 :: (CollapseReplaceableMaybe a, Monoid (ValDelta a)) => [ReplaceableMaybe a] -> ValDelta a
+x7 xs = foldMap collapse xs
 
 data HKDRoute = HKDValue | HKDDelta | HKDValDelta
 
@@ -239,7 +163,8 @@ type family HKD (f :: HKDRoute) a where
 
 data Thingy f = Thingy {
   _position :: HKD f (ReplaceOnly (Double,Double)),
-  _name     :: HKD f (ReplaceOnly String)
+  _name     :: HKD f (ReplaceOnly String),
+  _mesh     :: HKD f (ReplaceOnly String)
   } deriving (Generic)
 
 makeLenses ''Thingy
@@ -247,7 +172,7 @@ makeLenses ''Thingy
 instance (Show (HKD f (ReplaceOnly (Double,Double))),
           Show (HKD f (ReplaceOnly String))
           ) => Show (Thingy f) where
-    show (Thingy p n) = "Thingy (" ++ show p ++ ") (" ++ show n ++ ")"
+    show (Thingy p n m) = "Thingy (" ++ show p ++ ") (" ++ show n ++ ") (" ++ show m ++ ")"
 
 type instance ILCDelta (Thingy 'HKDValue) = Thingy 'HKDDelta
 type instance ValDelta (Thingy 'HKDValue) = Thingy 'HKDValDelta
@@ -282,25 +207,25 @@ instance Patchable (SumThingy 'HKDValue)
 --
 
 instance PatchReplaceable (SumThingy 'HKDValue) where
-  replaceableChanges (SumThing i)   (SumThing i')   = ReplaceablePatch $ SumThing (changes i i')
-  replaceableChanges (SumThing _)   (OtherThing o)  = ReplaceableNew $ OtherThing o
-  replaceableChanges (OtherThing _) (SumThing i)    = ReplaceableNew $ SumThing i
-  replaceableChanges (OtherThing o) (OtherThing o') = ReplaceablePatch $ OtherThing (changes o o')
+    replaceableChanges (SumThing i)   (SumThing i')   = ReplaceablePatch $ SumThing (changes i i')
+    replaceableChanges (SumThing _)   (OtherThing o)  = ReplaceableNew $ OtherThing o
+    replaceableChanges (OtherThing _) (SumThing i)    = ReplaceableNew $ SumThing i
+    replaceableChanges (OtherThing o) (OtherThing o') = ReplaceablePatch $ OtherThing (changes o o')
 
-  safeBundle ((SumThing x),   (SumThing dx))   = SumThing (bundleVD (x,dx))
-  safeBundle ((OtherThing x), (OtherThing dx)) = OtherThing (bundleVD (x,dx))
-  safeBundle ((SumThing x),   (OtherThing _))  = SumThing (bundleVD (x,noPatch))
-  safeBundle ((OtherThing x), (SumThing _))    = OtherThing (bundleVD (x,noPatch))
+    safeBundle ((SumThing x),   (SumThing dx))   = SumThing (bundleVD (x,dx))
+    safeBundle ((OtherThing x), (OtherThing dx)) = OtherThing (bundleVD (x,dx))
+    safeBundle ((SumThing x),   (OtherThing _))  = SumThing (bundleVD (x,noPatch))
+    safeBundle ((OtherThing x), (SumThing _))    = OtherThing (bundleVD (x,noPatch))
 
-  valDeltaNoPatch (SumThing x)   = SumThing (bundleVD (x,noPatch))
-  valDeltaNoPatch (OtherThing x) = OtherThing (bundleVD (x,noPatch))
+    valDeltaNoPatch (SumThing x)   = SumThing (bundleVD (x,noPatch))
+    valDeltaNoPatch (OtherThing x) = OtherThing (bundleVD (x,noPatch))
 
 newtype SumThingySafe = SumThingySafe (ReplaceableVal (SumThingy 'HKDValue))
-  deriving (Generic)
-  deriving (Patchable) via (ReplaceableVal (SumThingy 'HKDValue))
+    deriving (Generic)
+    deriving (Patchable) via (ReplaceableVal (SumThingy 'HKDValue))
   
 newtype SumThingySafeD = SumThingySafeD (ReplaceableDelta (SumThingy 'HKDValue))
-  deriving (PatchInstance) via (ReplaceableDelta (SumThingy 'HKDValue))
+    deriving (PatchInstance) via (ReplaceableDelta (SumThingy 'HKDValue))
 
 newtype SumThingySafeVD = SumThingySafeVD (ReplaceableValDelta (SumThingy 'HKDValue))
 
@@ -309,28 +234,15 @@ type instance ValDelta (SumThingySafe) = SumThingySafeVD
 
 
 --
--- ValDelta convenience function to treat @ValDelta a@ as @a@ via a lens
--- 
---
-
-valueLens :: (ValDeltaBundle a, Patchable a) => Lens' (ValDelta a) a
-valueLens = lens getter setter
-  where
-    getter = patchVD
-    setter dva a' = let (a,_da) = unbundleVD dva
-                        da' = changes a a'
-                    in bundleVD (a,da')
-
---
 -- Thingy functions
 --
 
 thingyToKey :: Thingy 'HKDValDelta -> Int
-thingyToKey t = let (ReplaceOnly n) = t ^. name . valueLens
+thingyToKey t = let (ReplaceOnly n) = t ^. name . valDelta
                 in hash n
 
-mkThingyVal :: (Double, Double) -> String -> Thingy 'HKDValue
-mkThingyVal p n = Thingy (ReplaceOnly p) (ReplaceOnly n)
+mkThingy :: (Double, Double) -> String -> String -> Thingy 'HKDValue
+mkThingy p n m = Thingy (ReplaceOnly p) (ReplaceOnly n) (ReplaceOnly m)
 
 {-tableOfStuff :: MagicJetTable (Thingy 'HKDValue)
 tableOfStuff = fromList thingyToKey $
@@ -339,40 +251,18 @@ tableOfStuff = fromList thingyToKey $
   (mkThingyVal (1.0,1.0) "Bob"),
   (mkThingyVal (4.0,5.0) "Blorpshaft")
   ]-}
-x = "就这?"
+xy :: [Char]
+xy = "就这?"
 
 newtype MapX i a = MapX (Map.Map i (ReplaceableValDelta (Maybe a)))
 
-instance Hask.Functor (MapX i) where
-  fmap f (MapX m) = MapX $ fmap (fmap (fmap f)) m
+mapOfStuff :: Map.Map Int (ReplaceableMaybe (Thingy 'HKDValue))
+mapOfStuff = insertRM 3 (mkThingy (3.0,2.0) "bob" "argh") (Map.fromList [])
 
-mapOfStuff :: Map.Map Integer (ReplaceableValDelta (Maybe (Thingy 'HKDValue)))
-mapOfStuff = Map.alter (alterILC (\_->Just $ mkThingyVal (3.0,2.0) "bob")) (3 :: Integer) (Map.fromList [])
 
-alterILC :: (Patchable a, ValDeltaBundle a) => (Maybe a -> Maybe a) -> (Maybe (ReplaceableValDelta (Maybe a))) -> (Maybe (ReplaceableValDelta (Maybe a)))
-alterILC f = \x -> case x of
-               -- nothing in the map yet
-               Nothing -> case (f Nothing) of
-                            Nothing -> Nothing
-                            Just v' -> Just (ReplaceableValues Nothing (Just v'))
-               Just v  -> case v of
-                            ReplaceableValDelta vd -> let (a,da) = unbundleVD vd
-                                                          fa = f (patch a da)
-                                                      in case fa of
-                                                        Nothing -> undefined
-                                                        a'@(Just _) -> Just (bundleVD (ReplaceableVal a, replaceableChanges a a'))
-                            ReplaceableValues a a' -> Just $ ReplaceableValues a (f a')
-                            
-updateILC :: (Patchable a, ValDeltaBundle a) => (ValDelta a -> ValDelta a) ->  (ReplaceableValDelta (Maybe a) -> ReplaceableValDelta (Maybe a))
-updateILC f = \vd -> case vd of
-                        ReplaceableValDelta da -> ReplaceableValDelta (fmap f da)
-                        ReplaceableValues a a' -> ReplaceableValues a (fmap (autoPatch f) a')
 
 stepPosition :: (Double,Double) -> (Double,Double)
 stepPosition (a,b) = (a,b+0.03)
-
-xx :: Maybe (ReplaceableValDelta (Maybe (Thingy 'HKDValue)))
-xx = Map.lookup 3 mapOfStuff
 
 --y = x ^? _Just .valueLens
 

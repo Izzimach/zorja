@@ -19,12 +19,12 @@ import Data.Functor.Identity
 
 import Zorja.Patchable
 import Zorja.Primitives
-import Zorja.Collections.ZJIntMap
+--import Zorja.Collections.ZJIntMap
 import Zorja.Collections.Cofree
 
 import Subtests.PatchGen
 import Subtests.Primitives
-import Subtests.ZJIntMap
+--import Subtests.ZJIntMap
 
 -- | Generate a CofD tree value and delta
 gen_CofDTree :: (Monoid (fb (CofD fb fa a)),
