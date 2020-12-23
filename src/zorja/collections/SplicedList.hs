@@ -10,13 +10,13 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 -- |
--- Module      : Zorja.Collections.Tombstone
+-- Module      : Zorja.Collections.SplicedList
 -- Description : Delta-tracking list using tombstones.
 -- Copyright   : (c) Gary Haussmann, 2020
 -- Stability   : experimental
 --
 -- Tracks changes in a list by adding add/remove markers to the list.
-module Zorja.Collections.Spliceable
+module Zorja.Collections.SplicedList
   ( SplicedList (..),
     SplicedListDelta (..),
     SplicedListValDelta (..),
@@ -201,7 +201,7 @@ instance (Patchable a) => PatchInstance (SplicedListDelta a) where
   (SplicedListDelta a) <^< (SplicedListDelta b) = SplicedListDelta $ mergeRaw a b
      where
        mergeRaw []               [] = []
-       
+
        -- if the first patch is longer, it's because there were deletes at the end
        mergeRaw (Deleted x : xs) ys = (Deleted x) : mergeRaw xs ys
        mergeRaw _                [] = error "Merge mismatch for SplicedListDelta"

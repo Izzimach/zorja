@@ -1,6 +1,6 @@
 
 
-module Zorja.Collections.SpliceableTest where
+module Zorja.Collections.SplicedListTest where
 
 import Hedgehog
 import Hedgehog.Gen
@@ -12,8 +12,8 @@ import Zorja.Primitives
 import Zorja.BasicGenerators
 import Zorja.PatchableTest
 import Zorja.PrimitivesTest
-import Zorja.Collections.Spliceable (SplicedList(..), SplicedListValDelta(..))
-import qualified Zorja.Collections.Spliceable as SP
+import Zorja.Collections.SplicedList (SplicedList(..), SplicedListValDelta(..))
+import qualified Zorja.Collections.SplicedList as SP
 
 mkSplicedListGenerator :: (Patchable a) => PatchableGen a -> PatchableGen (SplicedList a)
 mkSplicedListGenerator p@(PatchableGen g _dg) =
@@ -32,13 +32,16 @@ runRandomListOp _p@(PatchableGen g _dg) l =
   do
     let s = SP.length l
     if (s < 1)
-    -- if the list is empty we either do nothing or insert an element
+    -- if the list is empty we insert one or two elements
     then choice
       [
         (do
           v <- g
           return (SP.cons v l)),
-        (return l)
+        (do
+          v1 <- g
+          v2 <- g
+          return (SP.cons v1 (SP.cons v2 l))),
       ]
     -- for non-empty lists we can take/drop/insert/cons elements,
     -- or simply modify an element
@@ -56,7 +59,6 @@ runRandomListOp _p@(PatchableGen g _dg) l =
           return (SP.insertAt c v l)),
         (do
           v <- g
-          return (SP.cons v l)),
-        (return l)
+          return (SP.cons v l))
       ]
 

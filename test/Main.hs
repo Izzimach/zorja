@@ -9,7 +9,7 @@ import Hedgehog
 
 import Zorja.PatchableTest
 import Zorja.PrimitivesTest
-import Zorja.Collections.SpliceableTest
+import Zorja.Collections.SplicedListTest
 
 --
 -- tests of basic patch properties
