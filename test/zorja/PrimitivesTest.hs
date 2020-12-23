@@ -44,10 +44,10 @@ mkDiffNumGen g =
     }
 
 replaceOnlyIntegerGen :: PatchableGen (ReplaceOnly Integer)
-replaceOnlyIntegerGen = mkReplaceOnlyGen basic_intgen
+replaceOnlyIntegerGen = mkReplaceOnlyGen basic_integergen
 
 diffIntegerGen :: PatchableGen (DiffNum Integer)
-diffIntegerGen = mkDiffNumGen basic_intgen
+diffIntegerGen = mkDiffNumGen basic_integergen
 
 replaceOnlyFloatGen :: PatchableGen (ReplaceOnly Float)
 replaceOnlyFloatGen = mkReplaceOnlyGen basic_floatgen
@@ -56,5 +56,5 @@ replaceOnlyTextGen :: PatchableGen (ReplaceOnly T.Text)
 replaceOnlyTextGen = mkReplaceOnlyGen basic_textgen
 
 replaceOnlySumIntGen :: PatchableGen (ReplaceOnly (Sum Integer))
-replaceOnlySumIntGen = mkReplaceOnlyGen (fmap (Sum) basic_intgen)
+replaceOnlySumIntGen = mkReplaceOnlyGen (fmap (Sum) basic_integergen)
 

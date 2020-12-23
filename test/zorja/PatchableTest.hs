@@ -36,7 +36,7 @@ subprop_nullpatch (PatchableGen g _) =
 --
 
 subprop_patchmerge :: 
-    (Eq a, Show a, Show (ValDelta a), Patchable a)
+    (Eq a, Show a, Show (ILCDelta a), Show (ValDelta a), Patchable a)
         => PatchableGen a -> PropertyT IO ()
 subprop_patchmerge (PatchableGen g dg) =
     do

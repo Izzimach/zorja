@@ -29,11 +29,12 @@ module Zorja.Collections.Spliceable
     filter,
     filterT,
     insertAt,
-    cons
+    cons,
+    length
   )
 where
 
-import Prelude hiding (head, tail, take, drop, filter)
+import Prelude hiding (head, tail, take, drop, filter, length)
 
 import Data.Maybe
 
@@ -49,7 +50,7 @@ import Zorja.Patchable
 data SpliceElement a = ToAdd | SpliceElement a
   deriving (Eq, Show, Generic)
 
-data SpliceElementDelta a = Deleted | Added a | SplicePatch (ILCDelta a)
+data SpliceElementDelta a = Deleted a | Added a | SplicePatch (ILCDelta a)
   deriving (Generic)
 
 data SpliceElementValDelta a
@@ -59,7 +60,7 @@ data SpliceElementValDelta a
   deriving (Generic)
 
 instance (Show a, Show (ILCDelta a)) => Show (SpliceElementDelta a) where
-  show Deleted = "Deleted"
+  show (Deleted a) = "Deleted " ++ show a
   show (Added a) = "Added " ++ show a
   show (SplicePatch da) = "SplicePatch " ++ show da
 
@@ -81,12 +82,12 @@ type instance ValDelta (SpliceElement a) = SpliceElementValDelta a
 
 instance (ValDeltaBundle a) => ValDeltaBundle (SpliceElement a) where
   bundleVD (ToAdd, (Added a)) = SpliceAdd a
-  bundleVD ((SpliceElement a), Deleted) = SpliceDelete a
+  bundleVD ((SpliceElement a), Deleted _) = SpliceDelete a
   bundleVD ((SpliceElement a), (SplicePatch da)) = SpliceValDelta (bundleVD (a, da))
   bundleVD _ = error "Mismatch in SpliceElement bundleVD"
 
   unbundleVD (SpliceAdd a) = (ToAdd, Added a)
-  unbundleVD (SpliceDelete a) = (SpliceElement a, Deleted)
+  unbundleVD (SpliceDelete a) = (SpliceElement a, Deleted a)
   unbundleVD (SpliceValDelta va) =
     let (a, da) = unbundleVD va
      in (SpliceElement a, SplicePatch da)
@@ -100,9 +101,10 @@ instance (Patchable a) => Patchable (SpliceElement a) where
     patch (SpliceDelete _) = ToAdd
     patch (SpliceValDelta va) = SpliceElement (patch va)
 
+    changes ToAdd             ToAdd              = error "Changes of missing elements"
     changes ToAdd             (SpliceElement a') = Added a'
     changes (SpliceElement a) (SpliceElement a') = SplicePatch (changes a a')
-    changes _                 ToAdd              = Deleted
+    changes (SpliceElement a) ToAdd              = Deleted a
 
     diffBundle ToAdd             ToAdd              = error "Cannot diff two ToAdd values"
     diffBundle ToAdd             (SpliceElement a') = SpliceAdd a'
@@ -111,9 +113,9 @@ instance (Patchable a) => Patchable (SpliceElement a) where
 
 
 instance (Patchable a) => PatchInstance (SpliceElementDelta a) where
-  _         <^< Deleted  = Deleted
-  _ <^< (Added a)                = Added a
-  (Added a) <^< (SplicePatch da) = Added (patch $ bundleVD (a, da))
+  _           <^< Deleted a        = Deleted a
+  (Deleted a) <^< (Added a')       = SplicePatch (changes a a')
+  (Added a)   <^< (SplicePatch da) = Added (patch $ bundleVD (a, da))
   (SplicePatch da) <^< (SplicePatch da') = SplicePatch (da <^< da')
   _ <^< _ = error "Mismatch in SpliceElement (<^<)"
 
@@ -165,12 +167,12 @@ modifyElements f (SplicedListValDelta as) = SplicedListValDelta $ splice as
 instance (ValDeltaBundle a) => ValDeltaBundle (SplicedList a) where
   bundleVD (SplicedList a, SplicedListDelta da) = SplicedListValDelta (toSplice a da)
     where
-      toSplice [] [] = []
-      toSplice _ []  = error "Mismatch in bundle for SplicedList"
+      toSplice [] []                     = []
+      toSplice _  []                     = error "Mismatch in bundle for SplicedList"
       toSplice xs (Added x : dxs)        = (SpliceAdd x) : (toSplice xs dxs)
-      toSplice [] (Deleted : _)          = error "Mismatch in bundle for SplicedList"
+      toSplice [] (Deleted _ : _)        = error "Mismatch in bundle for SplicedList"
       toSplice [] (SplicePatch _ : _)    = error "Mismatch in bundle for SplicedList"
-      toSplice (x:xs) (Deleted : dxs)    = (SpliceDelete x) : (toSplice xs dxs)
+      toSplice (x:xs) (Deleted _ : dxs)  = (SpliceDelete x) : (toSplice xs dxs)
       toSplice (x:xs) (SplicePatch dx : dxs) = (SpliceValDelta (bundleVD (x,dx))) : (toSplice xs dxs)
   unbundleVD (SplicedListValDelta vs) =
     let (a, da) = unzip $ map unbundleVD vs
@@ -185,7 +187,7 @@ instance (Patchable a) => Patchable (SplicedList a) where
     where
       changesRaw (x:xs) (y:ys) = (SplicePatch $ changes x y) : changesRaw xs ys
       changesRaw []     ys     = fmap Added ys
-      changesRaw xs     []     = fmap (const Deleted) xs
+      changesRaw xs     []     = fmap Deleted xs
 
 
   diffBundle (SplicedList a) (SplicedList a') = SplicedListValDelta (changesRaw a a')
@@ -196,7 +198,26 @@ instance (Patchable a) => Patchable (SplicedList a) where
 
 
 instance (Patchable a) => PatchInstance (SplicedListDelta a) where
-  (SplicedListDelta a) <^< (SplicedListDelta b) = SplicedListDelta $ zipWith (<^<) a b
+  (SplicedListDelta a) <^< (SplicedListDelta b) = SplicedListDelta $ mergeRaw a b
+     where
+       mergeRaw []               [] = []
+       
+       -- if the first patch is longer, it's because there were deletes at the end
+       mergeRaw (Deleted x : xs) ys = (Deleted x) : mergeRaw xs ys
+       mergeRaw _                [] = error "Merge mismatch for SplicedListDelta"
+
+       -- if the second patch is longer it's because there were adds at the end
+       -- also an add didn't have an entry in the previous patch so don't consume
+       -- the elements in xs
+       mergeRaw xs (Added y :ys) = (Added y) : mergeRaw xs ys
+       mergeRaw [] _             = error "Merge mismatch for SplicedListDelta"
+
+       -- an add followed by a delete totally vanishes
+       mergeRaw (Added _:xs) (Deleted _ : ys) = mergeRaw xs ys
+
+       -- special cases handled, just merge the elements now
+       mergeRaw (x:xs) (y:ys)    = (x <^< y) : mergeRaw xs ys
+
 
 
 head :: (Patchable a) => SplicedListValDelta a -> Maybe (ValDelta a)
@@ -301,3 +322,11 @@ insertAt n' a' (SplicedListValDelta as') = SplicedListValDelta $ insertAtRaw n' 
 
 cons :: a -> SplicedListValDelta a -> SplicedListValDelta a
 cons v (SplicedListValDelta as) = SplicedListValDelta ((SpliceAdd v) : as)
+
+length :: SplicedListValDelta a -> Int
+length (SplicedListValDelta as) = lengthRaw as
+  where
+    lengthRaw [] = 0
+    -- deleted elements don't count toward the length
+    lengthRaw (SpliceDelete _ : xs) = lengthRaw xs
+    lengthRaw (_ : xs) = 1 + lengthRaw xs
