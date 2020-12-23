@@ -57,69 +57,7 @@ import System.IO (hSetEncoding, stderr, stdout, utf8)
 
 import Zorja.Patchable
 import Zorja.Primitives
---import Zorja.Collections.MagicTable
-
---import Zorja.Collections.ZJIntMap
---import Zorja.Collections.Cofree
-
--- | 'ZapList' is 'ZipList' with a 'Show1' instance so that 'show' works for @Cofree ZapList a@
-newtype ZapList a = ZapList [a]
-  deriving (Show, Eq)
-  deriving (Functor, Show1) via []
-
-instance Foldable ZapList where
-  foldMap fm (ZapList as) = foldMap fm as
-
-instance Applicative ZapList where
-  pure x = ZapList [x]
-  liftA2 f (ZapList a) (ZapList b) = ZapList (zipWith f a b)
-
-
-
-
-insertRM :: (Ord k, Patchable a, ValDeltaBundle a) => 
-  k -> a -> Map.Map k (ReplaceableMaybe a) -> Map.Map k (ReplaceableMaybe a)
-insertRM k v m = 
-  let r = (fromMaybeCRM (Map.lookup k m))
-  in
-    Map.insert k (set replaceableMaybe (Just v) r) m
-
-lookupRM :: (Ord k, Patchable a, ValDeltaBundle a) =>
-  k -> Map.Map k (ReplaceableMaybe a) -> Maybe a
-lookupRM k m = let (ReplaceableMaybe v) = (fromMaybeCRM (Map.lookup k m))
-               in view replaceable v
-
--- | Modify the post-delta value while leaving the original value unchanged.
---   To change the original AND the delta, use 'Map.alter' with a 
---   @ReplaceableMaybe a -> ReplaceableMaybe a@
-adjustRM :: (Ord k, Patchable a, ValDeltaBundle a) =>
-  (a -> a) -> k -> Map.Map k (ReplaceableMaybe a) -> Map.Map k (ReplaceableMaybe a)
-adjustRM f k m = let (ReplaceableMaybe v) = fromMaybeCRM (Map.lookup k m)
-                 in Map.insert k (ReplaceableMaybe $ (over replaceable (fmap f) v)) m
-             
-deleteRM :: (Ord k, ValDeltaBundle a) =>
-  k -> Map.Map k (ReplaceableMaybe a) -> Map.Map k (ReplaceableMaybe a)
-deleteRM k m =
-    case (Map.lookup k m) of
-        Nothing -> m
-        Just (ReplaceableMaybe v) ->
-            let v' = case v of
-                        (ReplaceableValDelta vd) -> let (a,_) = unbundleVD vd
-                                                    in ReplaceableValues a Nothing
-                        (ReplaceableValues a _) -> ReplaceableValues a Nothing
-            in
-              Map.insert k (ReplaceableMaybe v') m
-
-updateRM :: (Ord k, ValDeltaBundle a, Patchable a, Eq a, Eq (ValDelta a)) =>
-  (a -> Maybe a) -> k -> Map.Map k (ReplaceableMaybe a) -> Map.Map k (ReplaceableMaybe a)
-updateRM f k m = alterRM f' k m
-    where f' Nothing = Nothing
-          f' (Just x) = f x
-
-alterRM :: (Ord k, ValDeltaBundle a, Patchable a, Eq a, Eq (ValDelta a)) =>
-  (Maybe a -> Maybe a) -> k -> Map.Map k (ReplaceableMaybe a) -> Map.Map k (ReplaceableMaybe a)
-alterRM f k m = Map.alter f' k m
-    where f' = toMaybeCRM . (over replaceableMaybe f) . fromMaybeCRM
+import Zorja.Collections.MapRM
 
 
 x1 :: ValDelta (ReplaceOnly String)

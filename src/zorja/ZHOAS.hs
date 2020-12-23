@@ -125,7 +125,6 @@ instance Monoid (BoolChange) where
 
 instance PatchInstance BoolChange where
     a <^< b = a <> b
-    noPatch = mempty
 
 
 newtype ZBool = ZBool { unZBool :: Bool } deriving (Eq)

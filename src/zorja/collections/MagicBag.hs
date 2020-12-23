@@ -26,7 +26,8 @@ module Zorja.Collections.MagicBag (
     map,
     member,
     negate,
-    fromList
+    fromList,
+    distillBag
     )
     where
 
@@ -45,6 +46,7 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Merge.Strict
 
 import Zorja.Patchable
+import qualified Zorja.Collections.PatchableSet as PS
 import Zorja.Combine
 
 -- | The element count of a specific element in the MagicBag
@@ -201,45 +203,14 @@ instance (Ord a) => ValDeltaBundle (MagicBag a) where
                     | otherwise = Just x
 
 
--- | Delta for a set; holds the elements to be inserted and deleted
-data DeltaSet a = DeltaSet { inserts :: Set a, deletes :: Set a}
-    deriving (Eq, Show)
-
--- | Functions as 'delete' for 'DeltaSet'. Should add the element to 'deletes' and
---   make sure it isn't in 'inserts'
-moreDelete :: (Ord a) => a -> DeltaSet a -> DeltaSet a
-moreDelete v (DeltaSet i d) = DeltaSet (Set.delete v i) (Set.insert v d)
-
--- | Functions as 'insert' for 'DeltaSet'
-moreInsert :: (Ord a) => a -> DeltaSet a -> DeltaSet a
-moreInsert v (DeltaSet i d) = DeltaSet (Set.insert v i) (Set.delete v d)
-
-type instance ILCDelta (Set a) = DeltaSet a
-type instance ValDelta (Set a) = DSet a
-
-instance (Ord a) => Semigroup (DeltaSet a) where
-    (DeltaSet i1 d1) <> (DeltaSet i2 d2) =
-        let i' = Set.difference (Set.union i1 i2) d2
-            d' = Set.difference (Set.union d1 d2) i2
-        in
-            DeltaSet i' d'
-
-instance (Ord a) => Monoid (DeltaSet a) where
-    mempty = DeltaSet mempty mempty
-
-data DSet a = DSet (Set a) (DeltaSet a)
-
-instance ValDeltaBundle (Set a) where
-    bundleVD (a,da) = DSet a da
-    unbundleVD (DSet a da) = (a,da)
-
--- | Convert a 'MagicDeltaBag' with element counts to a 'DSet' which is just the elements
-distillBag :: (Ord a) => MagicDeltaBag a -> DSet a
-distillBag (MagicDeltaBag m) = Map.foldrWithKey distillElement (DSet mempty mempty) m
+-- | Convert a 'MagicDeltaBag' with element counts to a 'PatchableSet' which is just the elements
+--   along with inserts/deletes
+distillBag :: (Ord a) => MagicDeltaBag a -> PS.ValDeltaSet a
+distillBag (MagicDeltaBag m) = Map.foldrWithKey distillElement (PS.empty) m
     where
-        distillElement :: (Ord a) => a -> (MagicBagCount, MagicBagCount) -> DSet a -> DSet a
-        distillElement v (x,dx) (DSet s ds) =
+        distillElement :: (Ord a) => a -> (MagicBagCount, MagicBagCount) -> PS.ValDeltaSet a -> PS.ValDeltaSet a
+        distillElement v (x,dx) s =
             case (x == 0, x+dx == 0) of
-                (True, False) -> DSet s (moreDelete v ds)
-                (False, True) -> DSet s (moreInsert v ds)
-                _             -> DSet s ds
+                (True, False) -> PS.delete v s
+                (False, True) -> PS.insert v s
+                _             -> s

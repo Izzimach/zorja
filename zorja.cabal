@@ -27,30 +27,22 @@ common deps
                        generic-deriving,
                        generic-data,
                        recursion-schemes,
-                       comonad,
                        distributive,
                        free,
                        vector,
-                       kan-extensions,
                        groups,
-                       first-class-families,
-                       adjunctions,
-                       constrained-categories,
-                       hedgehog,
-                       hedgehog-classes
+                       constrained-categories
 
 
 common test-deps
-  build-depends:        hedgehog
+  build-depends:       hedgehog,
+                       hedgehog-classes
 
 library
   import: deps
   exposed-modules:     Zorja.Patchable,
                        Zorja.Primitives,
-                       Zorja.ZHOAS,
-                       Zorja.FunctorDExpr,
-                       Zorja.Collections.ListX,
-                       Zorja.Collections.Cofree
+                       Zorja.Collections.Spliceable
 
 test-suite zorja-test
   import: deps, test-deps
@@ -59,12 +51,9 @@ test-suite zorja-test
   hs-source-dirs:      test, src
   other-modules:       Zorja.Patchable,
                        Zorja.Primitives,
-                       Zorja.ZHOAS,
-                       Zorja.FunctorDExpr,
-                       Zorja.Collections.ListX,
-                       Zorja.Collections.Cofree,
-                       Subtests.PatchGen,
-                       Subtests.Primitives,
-                       Subtests.ListX,
-                       Subtests.Cofree
+                       Zorja.Collections.Spliceable
+                       Zorja.BasicGenerators
+                       Zorja.PatchableTest,
+                       Zorja.PrimitivesTest,
+                       Zorja.Collections.SpliceableTest
                       

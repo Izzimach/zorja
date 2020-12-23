@@ -12,6 +12,8 @@
 
 module Zorja.Collections.PatchableSet (
       PatchableSet (..)
+    , UpDownSet (..)
+    , ValDeltaSet (..)
     , empty
     , insert
     , delete
@@ -19,21 +21,20 @@ module Zorja.Collections.PatchableSet (
     , union
     , intersection
     , difference
-    , inserts
-    , deletes
     )
     where
 
 import GHC.Generics
 
 import Zorja.Patchable
-import Zorja.Jet
+import Zorja.Primitives
 
 import Data.Set (Set)
 import qualified Data.Set as Set
 
 
-newtype PatchableSet a = PatchableSet (Set a) deriving (Eq, Generic, Show)
+newtype PatchableSet a = PatchableSet (Set a)
+    deriving (Eq, Generic, Show)
 
 instance (Ord a) => Semigroup (PatchableSet a) where
     PatchableSet a <> PatchableSet b = PatchableSet (a <> b)
@@ -46,34 +47,44 @@ instance Foldable PatchableSet where
     foldMap fm (PatchableSet a) = foldMap fm a
 
 --
--- A set that describes inserts and deletes in no particular
+-- | A set that describes inserts and deletes in no particular
 -- order. Inserts and deletes should be disjoint
+--  There is no 'Semigroup' or 'Monoid' instance since I'm sure how to
+--  to define it without accessing the original value.
 --
-
 data UpDownSet a = UpDownSet {
       inserts :: Set a
     , deletes :: Set a
-    } deriving (Eq, Show)
+    } deriving (Eq, Show, Generic)
 
-instance (Ord a) => Semigroup (UpDownSet a) where
-    a <> b =  let ia = inserts a
-                  da = deletes a
-                  ib = inserts b
-                  db = deletes b
-              in
+instance (Ord a) => PatchInstance (UpDownSet a) where
+    (UpDownSet i0 d0) <^< (UpDownSet i1 d1) = 
                   --
                   -- patch a (da <> db) = patch (patch a da) db
                   --
-                  UpDownSet ((Set.difference ia db) `Set.union` ib)
-                            ((Set.difference da ib) `Set.union` db)
+                  -- Start with patch a and apply patch b.
+                  -- Items in b take precedence
+        UpDownSet ((Set.difference i0 d1) `Set.union` i1)
+                  ((Set.difference d0 i1) `Set.union` d1)
 
-instance (Ord a) => Monoid (UpDownSet a) where
-    mempty = UpDownSet Set.empty Set.empty
-    mappend = (<>)
+    noPatch = UpDownSet (Set.empty) (Set.empty)
 
-type instance (PatchDelta (PatchableSet a)) = UpDownSet a
+upDownInsert :: (Ord a) => a -> UpDownSet a -> UpDownSet a
+upDownInsert a (UpDownSet ia da) = UpDownSet (Set.insert a ia) (Set.delete a da)
 
-instance (Ord a) => Patchable (PatchableSet a) where
+upDownDelete :: (Ord a) => a -> UpDownSet a -> UpDownSet a
+upDownDelete a (UpDownSet ia da) = UpDownSet (Set.delete a ia) (Set.insert a da)
+
+
+
+
+
+data ValDeltaSet a = ValDeltaSet (PatchableSet a) (UpDownSet a)
+
+type instance (ILCDelta (PatchableSet a)) = UpDownSet a
+type instance (ValDelta (PatchableSet a)) = ValDeltaSet a
+
+instance (Ord a, PatchInstance (UpDownSet a)) => Patchable (PatchableSet a) where
     patch (PatchableSet a) da = PatchableSet $
         a `Set.union` (inserts da) `Set.difference` (deletes da)
     changes (PatchableSet a) (PatchableSet b) = 
@@ -81,47 +92,22 @@ instance (Ord a) => Patchable (PatchableSet a) where
             deletes' = Set.difference a b
         in UpDownSet inserts' deletes'
 
-empty :: (PatchableSet a)
-empty = (PatchableSet Set.empty)
+empty :: (ValDeltaSet a)
+empty = ValDeltaSet (PatchableSet Set.empty) (UpDownSet (Set.empty) (Set.empty))
 
---
--- general destructuring op on PatchedJet (PatchableSet a)
---
-goPJSet :: PatchedJet (PatchableSet a) 
-        -> (Set a -> Set a)
-        -> (Set a -> Set a)
-        -> (Set a -> Set a)
-        -> PatchedJet (PatchableSet a)
-goPJSet pj f1 f2 f3 = 
-    let (PatchableSet x) = (patchedval pj)
-        x' = PatchableSet (f1 x)
-        dx = history pj
-        --
-        -- inserts and deletes must be disjoint, so if we add @a@ to
-        -- the @inserts@ field we must make sure it isn't in the @deletes@
-        -- field
-        dx' = UpDownSet (f2 (inserts dx))
-                        (f3 (deletes dx))
-    in
-        PatchedJet x' dx'
+insert :: (Ord a) => a -> ValDeltaSet a -> ValDeltaSet a
+insert a (ValDeltaSet s u) = ValDeltaSet s (upDownInsert a u)
 
+delete :: (Ord a) => a -> ValDeltaSet a -> ValDeltaSet a
+delete a (ValDeltaSet s u) = ValDeltaSet s (upDownDelete a u)
 
-insert :: (Ord a) => a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
-insert a pj = let ia = Set.insert a
-                  da = Set.delete a
-              in
-                  goPJSet pj ia ia da
-
-delete :: (Ord a) => a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
-delete a pj = let ia = Set.insert a
-                  da = Set.delete a
-              in
-                  goPJSet pj da da ia
-
-member :: (Ord a) => a -> PatchedJet (PatchableSet a) -> Bool
-member a pj = let (PatchableSet x) = patchedval pj
-              in
-                  Set.member a x
+member :: (Ord a) => a -> ValDeltaSet a -> Bool
+member a (ValDeltaSet (PatchableSet s) (UpDownSet i d)) =
+    -- true IF:
+    --  1. a is a member of the inserted values
+    (Set.member a i) ||
+    --  2. a is in the original set and hasn't been deleted
+    ((Set.member a s) && not (Set.member a d))
               
 --
 -- Applying a union of two PatchedJet values is somewhat confusing, since
@@ -133,18 +119,21 @@ member a pj = let (PatchableSet x) = patchedval pj
 -- for union add all of a to the inserts, and remove any items in a from the
 -- deletes
 --
-union :: (Ord a) => Set a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
-union a pj =  let ia = Set.union a
-                  da = flip Set.difference a
-              in goPJSet pj ia ia da
+union :: (Ord a) => Set a -> ValDeltaSet a -> ValDeltaSet a
+union a (ValDeltaSet (PatchableSet s) (UpDownSet i d)) =
+    let i' = i `Set.union` a `Set.difference` s
+        d' = d `Set.difference` a
+    in
+        ValDeltaSet (PatchableSet s) (UpDownSet i' d')
 
-difference :: (Ord a) => Set a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
-difference a pj =   let ia = Set.union a
-                        da = flip Set.difference a
-                    in goPJSet pj da da ia
+difference :: (Ord a) => Set a -> ValDeltaSet a -> ValDeltaSet a
+difference a (ValDeltaSet (PatchableSet s) (UpDownSet i d)) =
+    let i' = i `Set.difference` a
+        d' = d `Set.union` a
+    in
+        ValDeltaSet (PatchableSet s) (UpDownSet i' d')
 
-intersection :: (Ord a) => Set a -> PatchedJet (PatchableSet a) -> PatchedJet (PatchableSet a)
-intersection a pj = let (PatchableSet x) = (patchedval pj)
-                        -- intersection removes elements of a that aren't in x
-                        removes = Set.difference a x
-                    in difference removes pj                
+intersection :: (Ord a) => Set a -> ValDeltaSet a -> ValDeltaSet a
+intersection a x@(ValDeltaSet (PatchableSet s) (UpDownSet i d)) =
+    let d' = (Set.union s i) `Set.difference` a
+    in difference d' x
