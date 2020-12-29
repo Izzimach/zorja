@@ -41,7 +41,7 @@ runRandomListOp _p@(PatchableGen g _dg) l =
         (do
           v1 <- g
           v2 <- g
-          return (SP.cons v1 (SP.cons v2 l))),
+          return (SP.cons v1 (SP.cons v2 l)))
       ]
     -- for non-empty lists we can take/drop/insert/cons elements,
     -- or simply modify an element

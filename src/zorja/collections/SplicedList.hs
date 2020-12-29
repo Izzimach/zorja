@@ -69,16 +69,17 @@ instance (Show a, Show (ValDelta a)) => Show (SpliceElementValDelta a) where
   show (SpliceDelete a) = "SpliceDelete " ++ show a
   show (SpliceValDelta aa) = "SpliceValDelta " ++ show aa
 
--- take the current element ValDelta and convert it into a delete
-deleteElement :: (ValDeltaBundle a) => SpliceElementValDelta a -> Maybe (SpliceElementValDelta a)
-deleteElement (SpliceAdd _) = Nothing
-deleteElement (SpliceDelete a) = Just $ SpliceDelete a
-deleteElement (SpliceValDelta aa) = let (a,_) = unbundleVD aa
-                                    in Just $ SpliceDelete a
 
 type instance ILCDelta (SpliceElement a) = SpliceElementDelta a
-
 type instance ValDelta (SpliceElement a) = SpliceElementValDelta a
+
+
+instance (Patchable a) => PatchInstance (SpliceElementDelta a) where
+  _           <^< Deleted a        = Deleted a
+  (Deleted a) <^< (Added a')       = SplicePatch (changes a a')
+  (Added a)   <^< (SplicePatch da) = Added (patch $ bundleVD (a, da))
+  (SplicePatch da) <^< (SplicePatch da') = SplicePatch (da <^< da')
+  _ <^< _ = error "Mismatch in SpliceElement (<^<)"
 
 instance (ValDeltaBundle a) => ValDeltaBundle (SpliceElement a) where
   bundleVD (ToAdd, (Added a)) = SpliceAdd a
@@ -112,12 +113,15 @@ instance (Patchable a) => Patchable (SpliceElement a) where
     diffBundle (SpliceElement a) (SpliceElement a') = SpliceValDelta (diffBundle a a')
 
 
-instance (Patchable a) => PatchInstance (SpliceElementDelta a) where
-  _           <^< Deleted a        = Deleted a
-  (Deleted a) <^< (Added a')       = SplicePatch (changes a a')
-  (Added a)   <^< (SplicePatch da) = Added (patch $ bundleVD (a, da))
-  (SplicePatch da) <^< (SplicePatch da') = SplicePatch (da <^< da')
-  _ <^< _ = error "Mismatch in SpliceElement (<^<)"
+
+-- take the current element ValDelta and convert it into a delete
+deleteElement :: (ValDeltaBundle a) => SpliceElementValDelta a -> Maybe (SpliceElementValDelta a)
+deleteElement (SpliceAdd _) = Nothing
+deleteElement (SpliceDelete a) = Just $ SpliceDelete a
+deleteElement (SpliceValDelta aa) = let (a,_) = unbundleVD aa
+                                    in Just $ SpliceDelete a
+
+
 
 --
 -- SplicedList
@@ -138,7 +142,6 @@ newtype SplicedListValDelta a = SplicedListValDelta [SpliceElementValDelta a]
   deriving (Generic)
 
 type instance ILCDelta (SplicedList a) = SplicedListDelta a
-
 type instance ValDelta (SplicedList a) = SplicedListValDelta a
 
 instance (Show a, Show (ILCDelta a)) => Show (SplicedListDelta a) where

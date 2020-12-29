@@ -285,11 +285,12 @@ instance (Patchable a) => Patchable (Maybe a) where
     diffBundle (Just x) (Just x') = MaybeBundle (diffBundle x x')
     diffBundle a        a'        = MaybeReplace a a'
 
-instance (PatchInstance (ILCDelta a)) => PatchInstance (MaybeDelta a) where
-    _             <^< MaybeNothing = MaybeNothing
-    MaybePatch dx <^< MaybePatch dx' = MaybePatch (dx <^< dx')
+instance (Patchable a, PatchInstance (ILCDelta a)) => PatchInstance (MaybeDelta a) where
+    _             <^< MaybeNothing   = MaybeNothing
     _             <^< MaybeJust x    = MaybeJust x
-    _ <^< _ = error "Mismatch for patch merge"
+    MaybeJust  x  <^< MaybePatch dx  = MaybeJust (patch $ bundleVD (x,dx))
+    MaybePatch dx <^< MaybePatch dx' = MaybePatch (dx <^< dx')
+    _             <^< _              = error "Mismatch for patch merge of Maybe"
 
 instance (ValDeltaBundle a) => ValDeltaBundle (Maybe a) where
     bundleVD (x, MaybeNothing) = MaybeReplace x Nothing

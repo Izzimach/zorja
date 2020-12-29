@@ -9,6 +9,9 @@ import Hedgehog.Range
 basic_integergen :: (MonadGen m) => m Integer
 basic_integergen = integral $ linearFrom (0::Integer) (-10000::Integer) (10000::Integer)
 
+basic_intgen :: (MonadGen m) => m Int
+basic_intgen = integral $ linearFrom (0::Int) (-10000::Int) (10000::Int)
+
 basic_floatgen :: Gen Float
 basic_floatgen = float $ linearFracFrom (0.0::Float) (-10000.0::Float) (10000.0::Float)
 

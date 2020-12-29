@@ -131,8 +131,6 @@ instance (PatchReplaceable a, PatchInstance (ILCDelta a)) => PatchInstance (Repl
     ReplaceableNoPatch    <^< (ReplaceablePatch dx)  = ReplaceablePatch dx
     _                     <^< (ReplaceableNew   x')  = ReplaceableNew x'
 
-    noPatch = ReplaceableNoPatch
-
 instance (PatchReplaceable a, ValDeltaBundle a) => ValDeltaBundle (ReplaceableVal a) where
     bundleVD (ReplaceableVal x, y) =
         case y of
@@ -179,14 +177,14 @@ tIf c f g vd =
 tBranch :: (Patchable b, ValDeltaBundle b) =>
     (ValDelta a -> ValDelta b) -> 
     (ValDelta a -> ValDelta b) -> 
-    ReplaceableValDelta Bool -> 
+    BoolVD -> 
     (ValDelta a -> ValDelta b)
 tBranch f g t vd =
     case t of
-        (ReplaceableValDelta (BoolVD x)) -> pickFunc x $ vd
-        (ReplaceableValues x x')         -> let (b ,db)  = unbundleVD $ pickFunc x  vd
-                                                (b',db') = unbundleVD $ pickFunc x' vd
-                                            in bundleVD (b, changes b (patch b' db'))
+        (BoolSame x)      -> pickFunc x $ vd
+        (BoolChange x x') -> let (b,db)  = unbundleVD $ pickFunc x  vd
+                                 bb' = pickFunc x' vd
+                             in diffBundle b b''
     where
         pickFunc b = if b then f else g
         
@@ -206,18 +204,6 @@ instance (Patchable a, ValDeltaBundle a) => PatchReplaceable (Maybe a) where
 
     valDeltaNoPatch Nothing = Nothing
     valDeltaNoPatch (Just x) = Just (bundleVD (x, noPatch))
-
-instance PatchReplaceable Bool where
-    replaceableChanges :: Bool -> Bool -> ReplaceableDelta Bool
-    replaceableChanges True True   = ReplaceableNoPatch
-    replaceableChanges False False = ReplaceableNoPatch
-    replaceableChanges _ b         = ReplaceableNew b
-    
-    safeBundle :: (Bool, BoolD) -> BoolVD
-    safeBundle (v,BoolD) = BoolVD v
-
-    valDeltaNoPatch :: Bool -> BoolVD
-    valDeltaNoPatch v = BoolVD v
 
 
 newtype ReplaceableMaybe a = ReplaceableMaybe (ReplaceableValDelta (Maybe a))
