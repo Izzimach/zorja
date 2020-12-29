@@ -15,7 +15,7 @@ data PatchableGen a = PatchableGen
     delta:: a -> Gen (ValDelta a)
   }
 
-genVD :: (ValDeltaBundle a) => PatchableGen a -> Gen (ValDelta a)
+genVD :: PatchableGen a -> Gen (ValDelta a)
 genVD (PatchableGen g dg) = g >>= dg
 
 -- | Patching with a null patch should not change the value
@@ -36,7 +36,7 @@ subprop_nullpatch (PatchableGen g _) =
 --
 
 subprop_patchmerge :: 
-    (Eq a, Show a, Show (ILCDelta a), Show (ValDelta a), Patchable a)
+    (Eq a, Show a, Show (ValDelta a), Patchable a)
         => PatchableGen a -> PropertyT IO ()
 subprop_patchmerge (PatchableGen g dg) =
     do

@@ -52,7 +52,7 @@ instance (Patchable a) => PatchInstance (MapDeltaElement a) where
     _                  <^< MapDeleteElement a = MapDeleteElement a
     MapInsertElement a <^< MapPatchElement da  = MapInsertElement (patch (bundleVD (a,da)))
     MapPatchElement da <^< MapPatchElement db  = MapPatchElement (da <^< db)
-    MapDeleteElement a <^< MapPatchElement da  = MapDeleteElement a
+    MapDeleteElement a <^< MapPatchElement _   = MapDeleteElement a
 
 newtype MapValues k a = MapValues (M.Map k a)
     deriving (Eq, Show)

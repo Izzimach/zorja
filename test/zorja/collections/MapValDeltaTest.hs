@@ -2,7 +2,7 @@ module Zorja.Collections.MapValDeltaTest where
 
 import Hedgehog
 import Hedgehog.Gen
-import Hedgehog.Range
+--import Hedgehog.Range
 
 import qualified Data.Map as M
 
@@ -16,14 +16,14 @@ import Zorja.PrimitivesTest
 import Zorja.Collections.MapValDelta as MM
 
 mkMapValDeltaGenerator :: (Patchable a) => PatchableGen a -> PatchableGen (MapValues Integer a)
-mkMapValDeltaGenerator p@(PatchableGen g dg) =
+mkMapValDeltaGenerator p@(PatchableGen g _dg) =
     PatchableGen
     {
         value =
           do
-            vals <- basic_listgen g
-            keys <- traverse (const basic_integergen) vals
-            let rawmap = M.fromList (zip keys vals)
+            vs <- basic_listgen g
+            ks <- traverse (const basic_integergen) vs
+            let rawmap = M.fromList (zip ks vs)
             return (MapValues rawmap)
         ,
         delta = \m ->
@@ -36,7 +36,7 @@ mkMapValDeltaGenerator p@(PatchableGen g dg) =
                 (runOp mm),
                 (runOp mm >>= runOp),
                 (runOp mm >>= runOp >>= runOp),
-                (runOp mm >>= runOp >>= runOp >>= runOp),
+                (runOp mm >>= runOp >>= runOp >>= runOp)
               ]
     }
 
@@ -62,13 +62,13 @@ randomMapOp p mm =
             return $ MM.insert newK newV mins
 
         deleteOp mdel = do
-            delK <- element (MM.keys mm)
-            return $ MM.delete delK mm
+            delK <- element (MM.keys mdel)
+            return $ MM.delete delK mdel
 
-        modifyOp (PatchableGen g dg) mmod = do
-            modK <- element (MM.keys mm)
-            case (MM.lookup modK mm) of
-              Nothing -> return mm
+        modifyOp (PatchableGen g _dg) mmod = do
+            modK <- element (MM.keys mmod)
+            case (MM.lookup modK mmod) of
+              Nothing -> return mmod
               Just _ ->
                 do
                   newValue <- g
