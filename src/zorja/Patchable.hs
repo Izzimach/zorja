@@ -262,21 +262,35 @@ instance (Patchable a, Patchable b) => Patchable (a,b) where
 -- | Patching for 'Maybe'
 --
 data MaybeDelta a =
+      -- switch from something to a Just value. 
       MaybeJust a
+      -- patch a Just value
     | MaybePatch (ILCDelta a)
+      -- switch from something to a Nothing value.
     | MaybeNothing
 
-data MaybeValDelta a = 
+data MaybeValDelta a =
+      -- valdelta of a Just
       MaybeBundle (ValDelta a)
+      -- switch between just and nothing values. Also used for Nothing to Nothing
     | MaybeReplace (Maybe a) (Maybe a)
 
 type instance ILCDelta (Maybe a) = MaybeDelta a
 type instance ValDelta (Maybe a) = MaybeValDelta a
 
+instance (Show a, Show (ILCDelta a)) => Show (MaybeDelta a) where
+  show (MaybeJust a) = "MaybeJust " ++ show a
+  show (MaybePatch da) = "MaybePatch " ++ show da
+  show (MaybeNothing)  = "MaybeNothing"
+  
+instance (Show a, Show (ValDelta a)) => Show (MaybeValDelta a) where
+  show (MaybeBundle aa) = "MaybeBundle " ++ show aa
+  show (MaybeReplace a a') = "MaybeReplace (" ++ show a ++ ") (" ++ show a' ++ ")"
+
 -- | Note we define 'Maybe' as a sum type which can switch between 'Nothing' and @'Just' x@.
---   Another interpretation is that 'Nothing' means an empty patch or no changes. For this sort
---   of thing use 'ReplaceOnly'. Also note that normally you wrap this in 'ReplaceableVal'
---   to avoid value/delta mismatch errors.
+--   Another interpretation is that 'Nothing' means an empty patch or no changes. That interpretation
+--   is NOT the one used here.  For the interpretation that Nothing means "no change" you should
+--   use 'ReplaceOnly'.
 --
 instance (Patchable a) => Patchable (Maybe a) where
     patch (MaybeBundle va)    = Just (patch va)
