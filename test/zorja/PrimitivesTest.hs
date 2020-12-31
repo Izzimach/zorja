@@ -58,3 +58,7 @@ replaceOnlyTextGen = mkReplaceOnlyGen basic_textgen
 replaceOnlySumIntGen :: PatchableGen (ReplaceOnly (Sum Integer))
 replaceOnlySumIntGen = mkReplaceOnlyGen (fmap (Sum) basic_integergen)
 
+
+maybeTextGen :: PatchableGen (Maybe (ReplaceOnly T.Text))
+maybeTextGen = mkMaybeGen replaceOnlyTextGen
+

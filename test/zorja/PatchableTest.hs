@@ -4,7 +4,10 @@
 
 module Zorja.PatchableTest where
 
+import qualified Data.Text as T
+
 import Hedgehog
+import qualified Hedgehog.Gen as Gen
 
 import Zorja.Patchable
 
@@ -17,6 +20,19 @@ data PatchableGen a = PatchableGen
 
 genVD :: PatchableGen a -> Gen (ValDelta a)
 genVD (PatchableGen g dg) = g >>= dg
+
+mkMaybeGen :: (Patchable a) => PatchableGen a -> PatchableGen (Maybe a)
+mkMaybeGen p@(PatchableGen g dg) =
+    PatchableGen
+    {
+        value = genMaybe,
+        delta = \a ->
+            do
+              a' <- genMaybe
+              return $ diffBundle a a'
+    }
+  where
+      genMaybe = Gen.choice [fmap Just g, return Nothing]
 
 -- | Patching with a null patch should not change the value
 subprop_nullpatch ::

@@ -23,6 +23,7 @@ prop_nullpatch =
         subprop_nullpatch diffIntegerGen
         subprop_nullpatch replaceOnlyFloatGen
         subprop_nullpatch replaceOnlyTextGen
+        subprop_nullpatch maybeTextGen
         subprop_nullpatch splicedIntegerListGen
         subprop_nullpatch replaceOnlyFloatMapGen
 
@@ -35,6 +36,7 @@ prop_patchmerges =
         subprop_patchmerge diffIntegerGen
         subprop_patchmerge replaceOnlyFloatGen
         subprop_patchmerge replaceOnlyTextGen
+        subprop_patchmerge maybeTextGen
         subprop_patchmerge splicedIntegerListGen
         subprop_patchmerge replaceOnlyFloatMapGen
 
@@ -46,6 +48,7 @@ prop_patchchanges =
         subprop_patchchanges diffIntegerGen
         subprop_patchchanges replaceOnlyFloatGen
         subprop_patchchanges replaceOnlyTextGen
+        subprop_patchchanges maybeTextGen
         subprop_patchchanges splicedIntegerListGen
         subprop_patchchanges replaceOnlyFloatMapGen
 
