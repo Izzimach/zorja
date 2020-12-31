@@ -42,7 +42,8 @@ library
   import: deps
   exposed-modules:     Zorja.Patchable,
                        Zorja.Primitives,
-                       Zorja.Collections.Spliceable
+                       Zorja.Collections.SplicedList
+                       Zorja.Collections.MapValDelta
 
 test-suite zorja-test
   import: deps, test-deps
@@ -51,7 +52,8 @@ test-suite zorja-test
   hs-source-dirs:      test, src
   other-modules:       Zorja.Patchable,
                        Zorja.Primitives,
-                       Zorja.Collections.Spliceable
+                       Zorja.Collections.SplicedList
+                       Zorja.Collections.MapValDelta
                        Zorja.BasicGenerators
                        Zorja.PatchableTest,
                        Zorja.PrimitivesTest,
