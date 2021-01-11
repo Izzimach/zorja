@@ -31,7 +31,9 @@ common deps
                        free,
                        vector,
                        groups,
-                       constrained-categories
+                       constrained-categories,
+                       generics-sop,
+                       template-haskell
 
 
 common test-deps
@@ -42,8 +44,10 @@ library
   import: deps
   exposed-modules:     Zorja.Patchable,
                        Zorja.Primitives,
+                       Zorja.SumTypeWrapper
                        Zorja.Collections.SplicedList
                        Zorja.Collections.MapValDelta
+                       Blackboard
 
 test-suite zorja-test
   import: deps, test-deps
@@ -52,10 +56,12 @@ test-suite zorja-test
   hs-source-dirs:      test, src
   other-modules:       Zorja.Patchable,
                        Zorja.Primitives,
+                       Zorja.SumTypeWrapper,
                        Zorja.Collections.SplicedList
                        Zorja.Collections.MapValDelta
                        Zorja.BasicGenerators
                        Zorja.PatchableTest,
                        Zorja.PrimitivesTest,
-                       Zorja.Collections.SpliceableTest
+                       Zorja.Collections.MapValDeltaTest
+                       Zorja.Collections.SplicedListTest
                       

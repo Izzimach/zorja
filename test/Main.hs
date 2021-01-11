@@ -12,6 +12,8 @@ import Zorja.PrimitivesTest
 import Zorja.Collections.SplicedListTest
 import Zorja.Collections.MapValDeltaTest
 
+import qualified Blackboard
+
 --
 -- tests of basic patch properties
 --
@@ -57,4 +59,7 @@ tests :: IO Bool
 tests = checkSequential $$(discover)
 
 main :: IO Bool
-main = tests
+main =
+    do
+        putStrLn (show Blackboard.y)
+        tests
