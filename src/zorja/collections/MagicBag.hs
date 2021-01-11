@@ -7,9 +7,10 @@ Module      : Zorja.Collections.MagicBag
 Description : Sets where each element has a non-zero count
 Stability   : Experimental
 
-Magic bags are sets where each element has a non-zero count associated
-with it. These are different from the normal multiset in that they
-allow for negative values through excessive deletions.
+Magic bags are sets where each element has a non-zero integer count associated
+with it. These are different from the normal multiset in that standard multisets
+allow allow positive counts. Magic bags here allow for positive or negative counts,
+in order to represent deletions.
 -}
 
 module Zorja.Collections.MagicBag (
@@ -130,26 +131,25 @@ newtype MagicDeltaBag a = MagicDeltaBag { unMagicDeltaBag :: Map a (MagicBagCoun
 -- | Similar to the magicbag alter, but updates the delta to reflect the change.
 -- Only remove the element is value + delta is 0. 
 magicDeltaBagAlter :: MagicBagCount -> Maybe (MagicBagCount, MagicBagCount) -> Maybe (MagicBagCount, MagicBagCount)
-magicDeltaBagAlter x my = let (y0,y1) = fromMaybe (0,0) my
-                              y1' = y1 + x
-                          in
-                              if (y0 + y1' == 0)
-                              then Nothing
-                              else Just (y0,y1')
+magicDeltaBagAlter x my =
+    let (y0,y1) = fromMaybe (0,0) my
+        y1' = y1 + x
+    in
+        if (y0 + y1' == 0)
+        then Nothing
+        else Just (y0,y1')
                           
 type MagicDeltaBagMergeOp = (MagicBagCount, MagicBagCount) -> (MagicBagCount, MagicBagCount) -> (MagicBagCount, MagicBagCount)
 
 maxDeltaMerge :: MagicDeltaBagMergeOp
-maxDeltaMerge (a,da) (b,db) = if
-                                  (a + da >= b + db)
+maxDeltaMerge (a,da) (b,db) = if (a + da >= b + db)
                               then -- a+da is max, so choose it
                                   (a,da)
                               else -- b+db is max, so modify a's patch to result in d+db
                                   (a, b + db - a)
 
 minDeltaMerge :: MagicDeltaBagMergeOp
-minDeltaMerge (a,da) (b,db) = if
-                                  (a + da < b + db)
+minDeltaMerge (a,da) (b,db) = if (a + da < b + db)
                               then -- a+da is min, so choose it
                                   (a,da)
                               else -- b+db is min, so modify a's patch to result in d+db
@@ -159,8 +159,9 @@ sumDeltaMerge :: MagicDeltaBagMergeOp
 sumDeltaMerge (a,da) (b,db) = (a + b, da + db)
 
 mergeDeltaBags :: (Ord a) => MagicDeltaBagMergeOp -> MagicDeltaBag a -> MagicDeltaBag a -> MagicDeltaBag a
-mergeDeltaBags mf (MagicDeltaBag a) (MagicDeltaBag b) = MagicDeltaBag $ merge f1 f2 fb a b
-    where
+mergeDeltaBags mf (MagicDeltaBag a) (MagicDeltaBag b) =
+    MagicDeltaBag $ merge f1 f2 fb a b
+      where
         f1 :: (Applicative f) => WhenMissing f k (MagicBagCount,MagicBagCount) (MagicBagCount,MagicBagCount)
         f1 = mapMissing (\k x -> mf x (0,0))
         f2 :: (Applicative f) => WhenMissing f k (MagicBagCount,MagicBagCount) (MagicBagCount,MagicBagCount)
@@ -185,8 +186,9 @@ instance AsMagicBag MagicDeltaBag where
 
 -- | Combining two MagicBags into a MagicDeltaBag
 instance (Ord a) => ValDeltaBundle (MagicBag a) where
-    bundleVD (MagicBag as, MagicBag bs) = MagicDeltaBag $ merge f1 f2 fb as bs
-        where
+    bundleVD (MagicBag as, MagicBag bs) =
+        MagicDeltaBag $ merge f1 f2 fb as bs
+          where
             f1 :: (Applicative f) => WhenMissing f k MagicBagCount (MagicBagCount,MagicBagCount)
             f1 = mapMissing (\k x -> (x,0 :: MagicBagCount))
             f2 :: (Applicative f) => WhenMissing f k MagicBagCount (MagicBagCount,MagicBagCount)
@@ -206,8 +208,9 @@ instance (Ord a) => ValDeltaBundle (MagicBag a) where
 -- | Convert a 'MagicDeltaBag' with element counts to a 'PatchableSet' which is just the elements
 --   along with inserts/deletes
 distillBag :: (Ord a) => MagicDeltaBag a -> PS.ValDeltaSet a
-distillBag (MagicDeltaBag m) = Map.foldrWithKey distillElement (PS.empty) m
-    where
+distillBag (MagicDeltaBag m) =
+    Map.foldrWithKey distillElement (PS.empty) m
+      where
         distillElement :: (Ord a) => a -> (MagicBagCount, MagicBagCount) -> PS.ValDeltaSet a -> PS.ValDeltaSet a
         distillElement v (x,dx) s =
             case (x == 0, x+dx == 0) of
