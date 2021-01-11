@@ -54,13 +54,10 @@ module Zorja.Patchable
   )
 where
 
-import Control.Applicative
-import qualified Control.Category as C
-import Data.Kind
 import qualified GHC.Generics as GHC
 import Generics.SOP
 import Generics.SOP.NS
-import Generics.SOP.Dict
+
 
 -- | For a type @a@ there is a delta @ILCDelta a@ that describes how to
 --  make changes to @a@ and produce a new value: @patch a (ILCDelta a) = a'@
@@ -391,6 +388,9 @@ dThen :: (Patchable b) => (Bool -> b) -> (BoolVD -> ValDelta b)
 dThen p (BoolChange t t') = diffBundle (p t) (p t')
 dThen p (BoolSame t)      = valueBundle (p t)
                      
+
+
+
 
 
 

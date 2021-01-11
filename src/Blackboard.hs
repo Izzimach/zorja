@@ -28,21 +28,15 @@
 -- | A "Scratch Buffer" used for experimental code.
 module Blackboard where
 
---import Data.Monoid (Sum(..))
-
 import Prelude
-
-import Data.Function
-import Data.Kind
-
 
 --import GHC.IO.Encoding (getLocaleEncoding)
 import System.IO (hSetEncoding, stderr, stdout, utf8)
 
 import Zorja.Patchable
+import Zorja.PatchableTH
 import Zorja.Primitives
 import Zorja.Collections.SplicedList
---import Zorja.Collections.MapValDelta
 import Zorja.SumTypeWrapper
 
 import qualified GHC.Generics as GHC
@@ -94,49 +88,33 @@ type instance ValDelta (Thingy 'HKDValue) = Thingy 'HKDValDelta
 --instance Patchable (Thingy 'HKDValue)
 
 
-data A a = 
+data A a b = 
     C a
   | D (DiffNum Integer)
-  | E (ReplaceOnly String)
+  | E b
   deriving (Show, GHC.Generic)
 
 $(genDeltaDataTypes ''A)
-$(genTypeInstances ''A)
-$(genClassInstances ''A)
+$(genDeltaInstances ''A)
 
-instance (Show (ILCDelta a)) => Show (A_delta a) where
+instance (Show (ILCDelta a), Show (ILCDelta b)) => Show (A_delta a b) where
   show (C_delta dc) = "Cdelta " ++ show dc
   show (D_delta dd) = "Ddelta " ++ show dd
   show (E_delta de) = "Edelta " ++ show de
   
-instance (Show (ValDelta a)) => Show (A_valdelta a) where
+instance (Show (ValDelta a), Show (ValDelta b)) => Show (A_valdelta a b) where
   show (C_valdelta db) = "Cvaldelta " ++ show db
   show (D_valdelta dd) = "Dvaldelta " ++ show dd
   show (E_valdelta de) = "Evaldelta " ++ show de
 
-x :: A Bool
+x :: A Bool (ReplaceOnly String)
 x = patch (D_valdelta (DValDelta 3 3))
 
-y :: A_valdelta Bool
+y :: A_valdelta Bool (ReplaceOnly Integer)
 y = bundleVD ( (C True), (C_delta True))
 
-z :: SumTypeValDelta (A Bool)
-z = diffBundle (SumTypeWrapper $ C True) (SumTypeWrapper $ D (DNum 3))
-
-
-geq :: (Generic a, All2 Eq (Code a)) => a -> a -> Bool
-geq = go `on` from
-  where
-    go :: forall xss. (All2 Eq xss, All SListI xss) => SOP I xss -> SOP I xss -> Bool
-    go (SOP (Z xs))  (SOP (Z ys))  = and . hcollapse $ hcliftA2 p eq xs ys
-    go (SOP (S xss)) (SOP (S yss)) = go (SOP xss) (SOP yss)
-    go _             _             = False
-
-    p :: Proxy Eq
-    p = Proxy
-
-    eq :: forall (a :: Data.Kind.Type). Eq a => I a -> I a -> K Bool a
-    eq (I a) (I b) = K (a == b)
+z :: SumTypeValDelta (A Bool (ReplaceOnly String))
+z = diffBundle (SumTypeWrapper $ C True) (SumTypeWrapper $ E (ReplaceOnly "Argh"))
 
 
 main :: IO ()

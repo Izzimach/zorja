@@ -112,10 +112,10 @@ instance ValDeltaBundle (ReplaceOnly a) where
     unbundleVD (ReplaceValDelta x dx) = (ReplaceOnly x, dx)
     valueBundle (ReplaceOnly x) = ReplaceValDelta x (Replacing Nothing)
 
-instance DeltaRelation (ReplaceOnly String) (Replacing String) 
-instance FlipDeltaRelation (Replacing String) (ReplaceOnly String)
-instance ValDeltaRelation (ReplaceOnly String) (ReplaceValDelta String)
-instance FlipValDeltaRelation (ReplaceValDelta String) (ReplaceOnly String)
+instance DeltaRelation (ReplaceOnly a) (Replacing a) 
+instance FlipDeltaRelation (Replacing a) (ReplaceOnly a)
+instance ValDeltaRelation (ReplaceOnly a) (ReplaceValDelta a)
+instance FlipValDeltaRelation (ReplaceValDelta a) (ReplaceOnly a)
 
 
 -- $DiffNum

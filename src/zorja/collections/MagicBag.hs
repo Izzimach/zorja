@@ -48,7 +48,6 @@ import Data.Map.Merge.Strict
 
 import Zorja.Patchable
 import qualified Zorja.Collections.PatchableSet as PS
-import Zorja.Combine
 
 -- | The element count of a specific element in the MagicBag
 type MagicBagCount = Int

@@ -10,6 +10,7 @@ import Hedgehog
 import qualified Hedgehog.Gen as Gen
 
 import Zorja.Patchable
+import Zorja.Primitives
 
 
 data PatchableGen a = PatchableGen 
@@ -33,6 +34,18 @@ mkMaybeGen p@(PatchableGen g dg) =
     }
   where
       genMaybe = Gen.choice [fmap Just g, return Nothing]
+
+boolVDGen :: PatchableGen Bool
+boolVDGen =
+    PatchableGen
+    {
+        value = Gen.bool,
+        delta = \b ->
+            do
+                b' <- Gen.bool
+                return (diffBundle b b')
+    }
+
 
 -- | Patching with a null patch should not change the value
 subprop_nullpatch ::
