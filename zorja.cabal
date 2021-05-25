@@ -43,6 +43,7 @@ common test-deps
 library
   import: deps
   exposed-modules:     Zorja.Patchable,
+                       Zorja.PatchableTH,
                        Zorja.Primitives,
                        Zorja.SumTypeWrapper,
                        Zorja.Collections.PatchableSet,
@@ -55,7 +56,9 @@ test-suite zorja-test
   type:                exitcode-stdio-1.0
   main-is:             Main.hs
   hs-source-dirs:      test, src
-  other-modules:       Zorja.Patchable,
+  other-modules:       Blackboard,
+                       Zorja.Patchable,
+                       Zorja.PatchableTH,
                        Zorja.Primitives,
                        Zorja.SumTypeWrapper,
                        Zorja.Collections.SplicedList,
@@ -63,6 +66,7 @@ test-suite zorja-test
                        Zorja.BasicGenerators
                        Zorja.PatchableTest,
                        Zorja.PrimitivesTest,
+                       Zorja.SumTypeWrapperTest,
                        Zorja.Collections.MapValDeltaTest,
                        Zorja.Collections.SplicedListTest
                       

@@ -24,17 +24,17 @@ module Zorja.Collections.PatchableSet (
     )
     where
 
-import GHC.Generics
+import qualified GHC.Generics as GHC
+import Generics.SOP
 
 import Zorja.Patchable
-import Zorja.Primitives
 
 import Data.Set (Set)
 import qualified Data.Set as Set
 
 
 newtype PatchableSet a = PatchableSet (Set a)
-    deriving (Eq, Generic, Show)
+    deriving (Eq, GHC.Generic, Show)
 
 instance (Ord a) => Semigroup (PatchableSet a) where
     PatchableSet a <> PatchableSet b = PatchableSet (a <> b)
@@ -55,19 +55,18 @@ instance Foldable PatchableSet where
 data UpDownSet a = UpDownSet {
       inserts :: Set a
     , deletes :: Set a
-    } deriving (Eq, Show, Generic)
+    }
+    deriving (Eq, Show, GHC.Generic)
 
 instance (Ord a) => PatchInstance (UpDownSet a) where
     (UpDownSet i0 d0) <^< (UpDownSet i1 d1) = 
-                  --
-                  -- patch a (da <> db) = patch (patch a da) db
-                  --
-                  -- Start with patch a and apply patch b.
-                  -- Items in b take precedence
+        --
+        -- patch a (da <> db) = patch (patch a da) db
+        --
+        -- Start with patch a and apply patch b.
+        -- Items in b take precedence
         UpDownSet ((Set.difference i0 d1) `Set.union` i1)
                   ((Set.difference d0 i1) `Set.union` d1)
-
-    noPatch = UpDownSet (Set.empty) (Set.empty)
 
 upDownInsert :: (Ord a) => a -> UpDownSet a -> UpDownSet a
 upDownInsert a (UpDownSet ia da) = UpDownSet (Set.insert a ia) (Set.delete a da)
@@ -80,17 +79,26 @@ upDownDelete a (UpDownSet ia da) = UpDownSet (Set.delete a ia) (Set.insert a da)
 
 
 data ValDeltaSet a = ValDeltaSet (PatchableSet a) (UpDownSet a)
+  deriving GHC.Generic
 
 type instance (ILCDelta (PatchableSet a)) = UpDownSet a
 type instance (ValDelta (PatchableSet a)) = ValDeltaSet a
 
-instance (Ord a, PatchInstance (UpDownSet a)) => Patchable (PatchableSet a) where
-    patch (PatchableSet a) da = PatchableSet $
+instance ValDeltaBundle (PatchableSet a) where
+    bundleVD (a, da) = ValDeltaSet a da
+    unbundleVD (ValDeltaSet a da) = (a,da)
+    valueBundle a = ValDeltaSet a (UpDownSet Set.empty Set.empty)
+
+instance (Ord a, Generic a, ValDeltaBundle a) => Patchable (PatchableSet a) where
+    patch (ValDeltaSet (PatchableSet a) da) = PatchableSet $
         a `Set.union` (inserts da) `Set.difference` (deletes da)
     changes (PatchableSet a) (PatchableSet b) = 
         let inserts' = Set.difference b a
             deletes' = Set.difference a b
-        in UpDownSet inserts' deletes'
+        in (UpDownSet inserts' deletes')
+    diffBundle a a' =
+        let da = changes a a'
+        in ValDeltaSet a da
 
 empty :: (ValDeltaSet a)
 empty = ValDeltaSet (PatchableSet Set.empty) (UpDownSet (Set.empty) (Set.empty))
@@ -134,6 +142,6 @@ difference a (ValDeltaSet (PatchableSet s) (UpDownSet i d)) =
         ValDeltaSet (PatchableSet s) (UpDownSet i' d')
 
 intersection :: (Ord a) => Set a -> ValDeltaSet a -> ValDeltaSet a
-intersection a x@(ValDeltaSet (PatchableSet s) (UpDownSet i d)) =
+intersection a x@(ValDeltaSet (PatchableSet s) (UpDownSet i _d)) =
     let d' = (Set.union s i) `Set.difference` a
     in difference d' x

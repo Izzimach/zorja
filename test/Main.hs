@@ -32,7 +32,7 @@ prop_nullpatch =
         subprop_nullpatch replaceOnlyFloatMapGen
         subprop_nullpatch basicSumTypeGen
 
--- | patching with (da1 <> da2) should be the same and patching first da1, then da2
+-- | patching with (da1 <> da2) should be the same as patching da1 then da2
 prop_patchmerges :: Property
 prop_patchmerges = 
     property $ do

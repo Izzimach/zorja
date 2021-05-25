@@ -114,8 +114,13 @@ y :: A_valdelta Bool (ReplaceOnly Integer)
 y = bundleVD ( (C True), (C_delta True))
 
 z :: SumTypeValDelta (A Bool (ReplaceOnly String))
-z = diffBundle (SumTypeWrapper $ C True) (SumTypeWrapper $ E (ReplaceOnly "Argh"))
+z = diffBundle (SumTypeWrapper $ E (ReplaceOnly "Argh")) (SumTypeWrapper $ C True) 
 
+sumIndex :: (ValDelta (SumTypeWrapper (A Bool (ReplaceOnly String)))) -> ValDelta (DiffNum Integer)
+sumIndex = dCase (\case
+                    C _ -> DNum 0
+                    D x -> x
+                    E _ -> DNum 2)
 
 main :: IO ()
 main = do

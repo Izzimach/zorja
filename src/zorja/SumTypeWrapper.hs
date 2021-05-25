@@ -92,14 +92,14 @@ sameConstructors a b = cs (from a) (from b)
 --
 -- Take a case statement/pattern match for a sum type and convert into a ValDelta - based function
 --
-dCase :: (Patchable a, Patchable b) => ((SumTypeWrapper a) -> b) -> (SumTypeValDelta a) -> ValDelta b
+dCase :: (Patchable a, Patchable b) => (a -> b) -> (SumTypeValDelta a) -> ValDelta b
 dCase fc (OneTag aa)      = let a  = valueUnbundle aa
-                                b  = fc (SumTypeWrapper a)
-                                b' = fc (SumTypeWrapper (patch aa))
+                                b  = fc a
+                                b' = fc (patch aa)
                             in
                                 diffBundle b b'
-dCase fc (ChangeTag a a') = let b  = fc (SumTypeWrapper a)
-                                b' = fc (SumTypeWrapper a')
+dCase fc (ChangeTag a a') = let b  = fc a
+                                b' = fc a'
                             in
                                 diffBundle b b'
 

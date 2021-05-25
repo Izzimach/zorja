@@ -130,7 +130,7 @@ deleteElement (SpliceValDelta aa) = let (a,_) = unbundleVD aa
 -- | For a list the delta is a list of 'SpliceElement'.
 --   If the delta is shorter than the original, missing elements are
 --   no-ops: @SpliceElement [] Buried@.
---   Also the delta can be one element longer than the original value if
+--   Also the delta can be longer than the original value if
 --   elements are appended to the end.
 newtype SplicedList a = SplicedList [a]
   deriving (Eq, Show, Generic)

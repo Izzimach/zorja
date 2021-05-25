@@ -41,9 +41,7 @@ module Zorja.Patchable
     valueLens,
 
     BoolVD (..),
-    dIf,
-    dThen,
-
+    
     MaybeDelta (..),
     MaybeValDelta (..),
 
@@ -198,7 +196,7 @@ lowerVD df = \a -> patch $ df $ valueBundle a
 
 -- | A lens to modify the patched value in a 'ValDelta', updating the delta value but
 --   preserving the original value. Use as a lens, for example @v ^. valueLens@ gets
---   the patched value of @v@
+--   the patched value of @v@. Useful if you are already using lens. If not, 
 valueLens :: forall f a. (Functor f, Patchable a) => (a -> f a) -> ValDelta a -> f (ValDelta a)
 valueLens f vd =
   let a  = valueUnbundle vd
@@ -206,13 +204,13 @@ valueLens f vd =
       bundleUp = \x -> diffBundle a x
    in fmap bundleUp a'
 
+
 --
 -- | The default @ValDelta@ is just a product. Note that other
 --   structures may have a different definition for @valDelta@.
 data Jet a = Jet a (ILCDelta a)
 
 deriving instance (Eq a, Eq (ILCDelta a)) => Eq (Jet a)
-
 deriving instance (Show a, Show (ILCDelta a)) => Show (Jet a)
 
 --
@@ -376,20 +374,6 @@ instance ValDeltaBundle Bool where
   unbundleVD (BoolSame x) = (x, x)
 
   valueBundle x = BoolSame x
-
-
--- | Generate a ValDelta-ish version of an if statement.
-dIf :: (Patchable a) => (a -> Bool) -> (ValDelta a -> BoolVD)
-dIf p = \aa -> let t = p (valueUnbundle aa)
-                   t' = p (patch aa)
-               in diffBundle t t'
-
-dThen :: (Patchable b) => (Bool -> b) -> (BoolVD -> ValDelta b)
-dThen p (BoolChange t t') = diffBundle (p t) (p t')
-dThen p (BoolSame t)      = valueBundle (p t)
-                     
-
-
 
 
 
