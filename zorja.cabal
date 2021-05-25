@@ -44,9 +44,10 @@ library
   import: deps
   exposed-modules:     Zorja.Patchable,
                        Zorja.Primitives,
-                       Zorja.SumTypeWrapper
-                       Zorja.Collections.SplicedList
-                       Zorja.Collections.MapValDelta
+                       Zorja.SumTypeWrapper,
+                       Zorja.Collections.PatchableSet,
+                       Zorja.Collections.SplicedList,
+                       Zorja.Collections.MapValDelta,
                        Blackboard
 
 test-suite zorja-test
@@ -57,11 +58,11 @@ test-suite zorja-test
   other-modules:       Zorja.Patchable,
                        Zorja.Primitives,
                        Zorja.SumTypeWrapper,
-                       Zorja.Collections.SplicedList
-                       Zorja.Collections.MapValDelta
+                       Zorja.Collections.SplicedList,
+                       Zorja.Collections.MapValDelta,
                        Zorja.BasicGenerators
                        Zorja.PatchableTest,
                        Zorja.PrimitivesTest,
-                       Zorja.Collections.MapValDeltaTest
+                       Zorja.Collections.MapValDeltaTest,
                        Zorja.Collections.SplicedListTest
                       
