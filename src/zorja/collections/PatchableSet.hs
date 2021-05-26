@@ -89,7 +89,7 @@ instance ValDeltaBundle (PatchableSet a) where
     unbundleVD (ValDeltaSet a da) = (a,da)
     valueBundle a = ValDeltaSet a (UpDownSet Set.empty Set.empty)
 
-instance (Ord a, Generic a, ValDeltaBundle a) => Patchable (PatchableSet a) where
+instance (Ord a, Generic a) => Patchable (PatchableSet a) where
     patch (ValDeltaSet (PatchableSet a) da) = PatchableSet $
         a `Set.union` (inserts da) `Set.difference` (deletes da)
     changes (PatchableSet a) (PatchableSet b) = 
